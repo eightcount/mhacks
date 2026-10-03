@@ -1,8 +1,8 @@
-# Catering platform — Phase 1 backend foundation
+# Catering platform — Phase 2 marketplace logic
 
 This project is the backend foundation for an agentic catering marketplace that will connect customers with local and home-owned caterers through conversational interfaces.
 
-Phase 1 provides the database model, validation, fictional development data, and database verification tooling. It intentionally does **not** implement a frontend, UI, iMessage, Photon, Spectrum, Fetch.ai, Agentverse, ASI:One, LLMs, authentication, payments, or marketplace business operations.
+Phase 2 adds deterministic marketplace services on top of the database model: structured caterer search, availability and menu retrieval, order creation, order transitions, and ownership-protected caterer management. It intentionally does **not** implement a frontend, UI, iMessage, Photon, Spectrum, Fetch.ai, Agentverse, ASI:One, LLMs, authentication, or payments.
 
 ## Planned architecture
 
@@ -89,6 +89,9 @@ npm run db:seed
 
 # Query caterers, menu items, availability, and orders to check connectivity
 npm run db:verify
+
+# Run the deterministic marketplace lifecycle demonstration
+npm run db:demo
 ```
 
 For a new database, run these in order after setting `DATABASE_URL`:
@@ -98,6 +101,7 @@ npm run db:generate
 npm run db:migrate
 npm run db:seed
 npm run db:verify
+npm run db:demo
 ```
 
 ## Database model
@@ -106,9 +110,10 @@ The Drizzle schema lives in `src/db/schema/index.ts` and defines:
 
 - `users` with customer and caterer roles, keyed by a flexible messaging identifier.
 - `caterers` with multi-value cuisine types, capacity, location, service radius, and minimum order.
+- Caterers also declare exact-match service areas, supported event styles, fulfillment support, and future-ready delivery settings (radius, fee, and minimum delivery order).
 - `menu_items` with exact PostgreSQL `numeric(12,2)` prices and extensible string-array dietary tags.
 - `availability` with one record per caterer/date.
-- `orders` and `order_items`, storing historical item prices directly on order items.
+- `orders` and `order_items`, storing historical item prices directly on order items plus the customer’s requested dishes/cuisines, event style, dietary requirements, event location, and fulfillment preference.
 - `conversations` and `messages`, with unique external provider IDs for future idempotent messaging ingestion.
 
 Foreign keys use restrictive delete behavior to preserve marketplace and historical order data. The schema includes the lookup indexes needed for the next phase, including messaging IDs, caterer location/activity, availability dates, order fields, and external conversation/message IDs.
@@ -123,7 +128,21 @@ Foreign keys use restrictive delete behavior to preserve marketplace and histori
 - Mediterranean
 - Korean
 
-It also adds a fictional customer, availability records, menu data, a sample request, and a sample conversation/message. `Jade Juniper Kitchen` is an active Chinese caterer with vegetarian choices, capacity for 30 guests, availability, and a plausible price point for a $450 request; the surrounding sample records provide useful filtering variation.
+It also adds a fictional customer, availability records, menu data, a sample request, and a sample conversation/message. `Jade Juniper Kitchen` is an active Chinese caterer serving Ann Arbor with vegetarian dumplings, buffet support, delivery, capacity for 30 guests, availability, and a plausible price point for a $450 request. The surrounding records intentionally differ by availability, price, cuisines, capacities, event styles, dietary options, service areas, and fulfillment support.
+
+## Marketplace services
+
+`src/services/` exposes normal TypeScript functions, ready for a future agent or HTTP layer:
+
+- `searchCaterers(criteria)` checks date, budget plausibility, cuisine/dish availability, headcount, event style, dietary menu data, exact location/service-area match, and fulfillment method.
+- `checkAvailability(catererId, eventDate, headcount)` returns typed availability reasons.
+- `getMenu(catererId, filters)` returns active menu items, optionally filtered by dietary restrictions and dish terms.
+- `createOrder(input)` validates a customer, caterer, requirements, selected menu items, and database-derived prices; it creates the order and items in one transaction.
+- `requestOrder(orderId, customerId)`, `acceptOrder(orderId, catererId)`, `declineOrder(orderId, catererId)`, `cancelOrder(orderId, customerId)`, and `completeOrder(orderId, catererId)` enforce valid state transitions and ownership.
+- `getOrder` and `getOrders` retrieve structured order data.
+- Caterer owners can update availability, menu items, and marketplace service settings through actor-ID-protected functions.
+
+Location matching is intentionally an exact normalized string comparison against `location` and `serviceAreas`. The isolated `LocationMatcher` interface can later be replaced with distance-aware geographic logic without changing service callers.
 
 ## Project structure
 
@@ -137,15 +156,16 @@ src/
     seed.ts       Fictional development data
     verify.ts     Read-only database verification
   messaging/      Future Photon/Spectrum boundary (placeholder only)
-  services/       Future marketplace business logic (placeholder only)
+  services/       Deterministic marketplace logic and domain errors
   tools/          Future agent-callable functions (placeholder only)
   types/          Shared domain constants and inferred types
-  validation/     Zod input validation schemas
+  validation/     Zod request and management validation schemas
 tests/
+  marketplace-logic.test.ts
   validation.test.ts
 drizzle/          Generated SQL migrations (after db:generate)
 ```
 
-## Intentional Phase 1 boundaries
+## Intentional Phase 2 boundaries
 
-The `agent/`, `messaging/`, `services/`, and `tools/` directories document future integration seams only. In particular, no `searchCaterers`, order workflow, availability workflow, menu mutation, iMessage, Photon, or Fetch.ai functionality exists yet. Those belong to the next phase.
+The `agent/`, `messaging/`, and `tools/` directories remain future integration seams. There is no Fetch.ai, Photon, Spectrum, iMessage, LLM, authentication, payment, frontend, or UI implementation in this phase.

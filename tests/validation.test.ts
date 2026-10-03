@@ -18,7 +18,9 @@ const validCaterer = {
   location: "Test District",
   serviceRadius: 10,
   minimumOrder: 100,
-  maximumCapacity: 50
+  maximumCapacity: 50,
+  supportedEventStyles: ["CASUAL"] as const,
+  fulfillmentMethod: "PICKUP" as const
 };
 
 const validMenuItem = {
@@ -33,14 +35,25 @@ const validOrder = {
   customerId,
   catererId,
   eventDate: "2030-06-15",
-  guestCount: 20,
+  headcount: 20,
   budget: 300,
-  estimatedTotal: 240
+  dishes: [],
+  cuisines: ["CHINESE"],
+  eventStyle: "CASUAL" as const,
+  dietaryRestrictions: [],
+  location: "Test District",
+  fulfillmentMethod: "PICKUP" as const,
+  menuItems: [
+    {
+      menuItemId: "33000000-0000-4000-8000-000000000001",
+      quantity: 20
+    }
+  ]
 };
 
 describe("foundational validation", () => {
   it("rejects an invalid guest count", () => {
-    expect(createOrderSchema.safeParse({ ...validOrder, guestCount: 0 }).success).toBe(false);
+    expect(createOrderSchema.safeParse({ ...validOrder, headcount: 0 }).success).toBe(false);
   });
 
   it("rejects a negative menu item price", () => {

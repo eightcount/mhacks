@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import { closeDatabaseConnection, db } from "./index.js";
 import {
   availability,
@@ -98,10 +99,16 @@ async function seedDatabase(): Promise<void> {
             description:
               "Family-style Chinese catering with vegetable-forward banquet dishes.",
             cuisineTypes: ["CHINESE"],
-            location: "Linden District",
+            location: "Ann Arbor, MI",
+            serviceAreas: ["Ann Arbor, MI", "Ypsilanti, MI"],
             serviceRadius: 20,
             minimumOrder: "150.00",
             maximumCapacity: 85,
+            supportedEventStyles: ["BUFFET", "FAMILY_STYLE", "CASUAL"],
+            fulfillmentMethod: "DELIVERY",
+            deliveryRadius: 20,
+            deliveryFee: "25.00",
+            minimumDeliveryOrder: "150.00",
             active: true
           },
           {
@@ -110,10 +117,16 @@ async function seedDatabase(): Promise<void> {
             businessName: "Copper Cactus Taqueria",
             description: "Festive Mexican taco bars and fresh sides for casual gatherings.",
             cuisineTypes: ["MEXICAN"],
-            location: "Rivermark",
+            location: "Ypsilanti, MI",
+            serviceAreas: ["Ypsilanti, MI"],
             serviceRadius: 15,
             minimumOrder: "200.00",
             maximumCapacity: 140,
+            supportedEventStyles: ["CASUAL", "DROP_OFF"],
+            fulfillmentMethod: "EITHER",
+            deliveryRadius: 15,
+            deliveryFee: "20.00",
+            minimumDeliveryOrder: "200.00",
             active: true
           },
           {
@@ -122,10 +135,16 @@ async function seedDatabase(): Promise<void> {
             businessName: "Verdant Table Collective",
             description: "Plant-based seasonal spreads made for smaller, thoughtful events.",
             cuisineTypes: ["VEGAN", "CONTEMPORARY"],
-            location: "Linden District",
+            location: "Ann Arbor, MI",
+            serviceAreas: ["Ann Arbor, MI"],
             serviceRadius: 10,
             minimumOrder: "275.00",
             maximumCapacity: 45,
+            supportedEventStyles: ["BUFFET", "FORMAL"],
+            fulfillmentMethod: "PICKUP",
+            deliveryRadius: null,
+            deliveryFee: null,
+            minimumDeliveryOrder: null,
             active: true
           },
           {
@@ -134,10 +153,16 @@ async function seedDatabase(): Promise<void> {
             businessName: "Saffron Harbor Mezze",
             description: "Mediterranean mezze platters, grills, and bright seasonal salads.",
             cuisineTypes: ["MEDITERRANEAN"],
-            location: "Harbor Point",
+            location: "Detroit, MI",
+            serviceAreas: ["Detroit, MI"],
             serviceRadius: 25,
             minimumOrder: "300.00",
             maximumCapacity: 110,
+            supportedEventStyles: ["FORMAL", "FAMILY_STYLE"],
+            fulfillmentMethod: "DELIVERY",
+            deliveryRadius: 25,
+            deliveryFee: "40.00",
+            minimumDeliveryOrder: "350.00",
             active: true
           },
           {
@@ -146,14 +171,40 @@ async function seedDatabase(): Promise<void> {
             businessName: "Seoul Meadow Supper Club",
             description: "Korean comfort food and tabletop barbecue for celebratory meals.",
             cuisineTypes: ["KOREAN"],
-            location: "Northfield",
+            location: "Ann Arbor, MI",
+            serviceAreas: ["Ann Arbor, MI"],
             serviceRadius: 18,
             minimumOrder: "180.00",
             maximumCapacity: 60,
+            supportedEventStyles: ["CASUAL", "INDIVIDUAL_MEALS"],
+            fulfillmentMethod: "PICKUP",
+            deliveryRadius: null,
+            deliveryFee: null,
+            minimumDeliveryOrder: null,
             active: false
           }
         ])
-        .onConflictDoNothing({ target: caterers.id });
+        .onConflictDoUpdate({
+          target: caterers.id,
+          set: {
+            ownerUserId: sql`excluded.owner_user_id`,
+            businessName: sql`excluded.business_name`,
+            description: sql`excluded.description`,
+            cuisineTypes: sql`excluded.cuisine_types`,
+            location: sql`excluded.location`,
+            serviceAreas: sql`excluded.service_areas`,
+            serviceRadius: sql`excluded.service_radius`,
+            minimumOrder: sql`excluded.minimum_order`,
+            maximumCapacity: sql`excluded.maximum_capacity`,
+            supportedEventStyles: sql`excluded.supported_event_styles`,
+            fulfillmentMethod: sql`excluded.fulfillment_method`,
+            deliveryRadius: sql`excluded.delivery_radius`,
+            deliveryFee: sql`excluded.delivery_fee`,
+            minimumDeliveryOrder: sql`excluded.minimum_delivery_order`,
+            active: sql`excluded.active`,
+            updatedAt: new Date()
+          }
+        });
 
       await tx
         .insert(menuItems)
@@ -161,18 +212,18 @@ async function seedDatabase(): Promise<void> {
           {
             id: ids.jadeMenuOne,
             catererId: ids.jade,
-            name: "Vegetable Mapo Tofu",
-            description: "Silken tofu with mushrooms and a mild pepper bean sauce.",
+            name: "Vegetable Dumplings",
+            description: "Hand-folded vegetable dumplings with ginger dipping sauce.",
             price: "11.50",
-            dietaryTags: ["VEGETARIAN", "VEGAN", "GLUTEN_FREE"]
+            dietaryTags: ["VEGETARIAN", "VEGAN"]
           },
           {
             id: ids.jadeMenuTwo,
             catererId: ids.jade,
-            name: "Ginger Scallion Noodles",
-            description: "Wok-tossed noodles with ginger, scallions, and seasonal greens.",
+            name: "Ginger Scallion Fried Rice",
+            description: "Wok-tossed fried rice with ginger, scallions, and seasonal greens.",
             price: "10.00",
-            dietaryTags: ["VEGETARIAN", "VEGAN"]
+            dietaryTags: ["VEGETARIAN", "VEGAN", "GLUTEN_FREE"]
           },
           {
             id: ids.jadeMenuThree,
@@ -279,7 +330,18 @@ async function seedDatabase(): Promise<void> {
             dietaryTags: ["VEGETARIAN", "VEGAN", "GLUTEN_FREE"]
           }
         ])
-        .onConflictDoNothing({ target: menuItems.id });
+        .onConflictDoUpdate({
+          target: menuItems.id,
+          set: {
+            catererId: sql`excluded.caterer_id`,
+            name: sql`excluded.name`,
+            description: sql`excluded.description`,
+            price: sql`excluded.price`,
+            dietaryTags: sql`excluded.dietary_tags`,
+            active: sql`excluded.active`,
+            updatedAt: new Date()
+          }
+        });
 
       await tx
         .insert(availability)
@@ -295,8 +357,13 @@ async function seedDatabase(): Promise<void> {
           { catererId: ids.seoul, date: "2030-06-15", available: true, capacityOverride: 55 },
           { catererId: ids.seoul, date: "2030-06-22", available: true, capacityOverride: 60 }
         ])
-        .onConflictDoNothing({
-          target: [availability.catererId, availability.date]
+        .onConflictDoUpdate({
+          target: [availability.catererId, availability.date],
+          set: {
+            available: sql`excluded.available`,
+            capacityOverride: sql`excluded.capacity_override`,
+            updatedAt: new Date()
+          }
         });
 
       await tx
@@ -308,11 +375,36 @@ async function seedDatabase(): Promise<void> {
           eventDate: "2030-06-15",
           guestCount: 30,
           budget: "450.00",
-          estimatedTotal: "345.00",
+          estimatedTotal: "370.00",
+          requestedDishes: ["dumplings"],
+          requestedCuisines: ["Chinese"],
+          eventStyle: "BUFFET",
+          dietaryRestrictions: ["VEGETARIAN"],
+          eventLocation: "Ann Arbor, MI",
+          fulfillmentMethod: "DELIVERY",
           status: "REQUESTED",
           specialRequests: "Please include vegetarian serving labels."
         })
-        .onConflictDoNothing({ target: orders.id });
+        .onConflictDoUpdate({
+          target: orders.id,
+          set: {
+            customerId: sql`excluded.customer_id`,
+            catererId: sql`excluded.caterer_id`,
+            eventDate: sql`excluded.event_date`,
+            guestCount: sql`excluded.guest_count`,
+            budget: sql`excluded.budget`,
+            estimatedTotal: sql`excluded.estimated_total`,
+            requestedDishes: sql`excluded.requested_dishes`,
+            requestedCuisines: sql`excluded.requested_cuisines`,
+            eventStyle: sql`excluded.event_style`,
+            dietaryRestrictions: sql`excluded.dietary_restrictions`,
+            eventLocation: sql`excluded.event_location`,
+            fulfillmentMethod: sql`excluded.fulfillment_method`,
+            status: sql`excluded.status`,
+            specialRequests: sql`excluded.special_requests`,
+            updatedAt: new Date()
+          }
+        });
 
       await tx
         .insert(orderItems)

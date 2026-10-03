@@ -1,3 +1,3 @@
-# Future marketplace services
+# Marketplace services
 
-Marketplace business logic will live here in a later phase. No search, ordering, menu, or availability operations are implemented in Phase 1.
+Phase 2 implements deterministic catering search, availability, menu, order, and caterer-management services here. They return structured data only; future agent and messaging integrations remain separate.

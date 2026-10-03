@@ -15,6 +15,8 @@ import {
   varchar
 } from "drizzle-orm/pg-core";
 import {
+  eventStyles,
+  fulfillmentMethods,
   messageSenders,
   orderStatuses,
   userRoles
@@ -23,6 +25,8 @@ import {
 export const userRoleEnum = pgEnum("user_role", userRoles);
 export const orderStatusEnum = pgEnum("order_status", orderStatuses);
 export const messageSenderEnum = pgEnum("message_sender", messageSenders);
+export const eventStyleEnum = pgEnum("event_style", eventStyles);
+export const fulfillmentMethodEnum = pgEnum("fulfillment_method", fulfillmentMethods);
 
 const timestamps = {
   createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
@@ -58,19 +62,43 @@ export const caterers = pgTable(
     description: text("description").notNull(),
     cuisineTypes: text("cuisine_types").array().notNull(),
     location: varchar("location", { length: 255 }).notNull(),
+    serviceAreas: text("service_areas").array().default([]).notNull(),
     serviceRadius: integer("service_radius").notNull(),
     minimumOrder: numeric("minimum_order", { precision: 12, scale: 2 }).notNull(),
     maximumCapacity: integer("maximum_capacity").notNull(),
+    supportedEventStyles: eventStyleEnum("supported_event_styles")
+      .array()
+      .default(["CASUAL"])
+      .notNull(),
+    fulfillmentMethod: fulfillmentMethodEnum("fulfillment_method")
+      .default("PICKUP")
+      .notNull(),
+    deliveryRadius: integer("delivery_radius"),
+    deliveryFee: numeric("delivery_fee", { precision: 12, scale: 2 }),
+    minimumDeliveryOrder: numeric("minimum_delivery_order", { precision: 12, scale: 2 }),
     active: boolean("active").default(true).notNull(),
     ...timestamps
   },
   (table) => [
     index("caterers_location_index").on(table.location),
     index("caterers_active_index").on(table.active),
+    index("caterers_fulfillment_method_index").on(table.fulfillmentMethod),
     index("caterers_owner_user_id_index").on(table.ownerUserId),
     check("caterers_service_radius_nonnegative", sql`${table.serviceRadius} >= 0`),
     check("caterers_minimum_order_nonnegative", sql`${table.minimumOrder} >= 0`),
-    check("caterers_maximum_capacity_positive", sql`${table.maximumCapacity} > 0`)
+    check("caterers_maximum_capacity_positive", sql`${table.maximumCapacity} > 0`),
+    check(
+      "caterers_delivery_radius_nonnegative",
+      sql`${table.deliveryRadius} is null or ${table.deliveryRadius} >= 0`
+    ),
+    check(
+      "caterers_delivery_fee_nonnegative",
+      sql`${table.deliveryFee} is null or ${table.deliveryFee} >= 0`
+    ),
+    check(
+      "caterers_minimum_delivery_order_nonnegative",
+      sql`${table.minimumDeliveryOrder} is null or ${table.minimumDeliveryOrder} >= 0`
+    )
   ]
 );
 
@@ -131,6 +159,14 @@ export const orders = pgTable(
     guestCount: integer("guest_count").notNull(),
     budget: numeric("budget", { precision: 12, scale: 2 }).notNull(),
     estimatedTotal: numeric("estimated_total", { precision: 12, scale: 2 }).notNull(),
+    requestedDishes: text("requested_dishes").array().default([]).notNull(),
+    requestedCuisines: text("requested_cuisines").array().default([]).notNull(),
+    eventStyle: eventStyleEnum("event_style").default("CASUAL").notNull(),
+    dietaryRestrictions: text("dietary_restrictions").array().default([]).notNull(),
+    eventLocation: varchar("event_location", { length: 255 }).notNull(),
+    fulfillmentMethod: fulfillmentMethodEnum("fulfillment_method")
+      .default("PICKUP")
+      .notNull(),
     status: orderStatusEnum("status").default("DRAFT").notNull(),
     specialRequests: text("special_requests"),
     ...timestamps
@@ -140,6 +176,7 @@ export const orders = pgTable(
     index("orders_caterer_id_index").on(table.catererId),
     index("orders_event_date_index").on(table.eventDate),
     index("orders_status_index").on(table.status),
+    index("orders_event_location_index").on(table.eventLocation),
     check("orders_guest_count_positive", sql`${table.guestCount} > 0`),
     check("orders_budget_nonnegative", sql`${table.budget} >= 0`),
     check("orders_estimated_total_nonnegative", sql`${table.estimatedTotal} >= 0`)
