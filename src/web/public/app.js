@@ -82,22 +82,14 @@ let hasRendered = false;
 let lastData = null;
 let latestRequest = 0;
 let inFlight = 0;
+/** True for the render after a detail view opens or changes month, so its charts grow in once. */
+let revealCharts = false;
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text !== undefined) node.textContent = text;
   return node;
-}
-
-function icon(id, className = "icon") {
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("class", className);
-  svg.setAttribute("aria-hidden", "true");
-  const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
-  use.setAttribute("href", `#${id}`);
-  svg.append(use);
-  return svg;
 }
 
 /** Formats integer cents from the API; no floating-point money math. */
@@ -305,6 +297,8 @@ function initials(name) {
 function renderHeader(data) {
   const { businessName, active } = data.caterer;
   byId("brand-mark").textContent = initials(businessName);
+  byId("brand-mark").hidden = false;
+  byId("brand-divider").hidden = false;
   byId("today-label").textContent = formatDate(data.today, { weekday: "long", month: "long", day: "numeric" });
   const name = byId("business-name");
   name.replaceChildren(el("span", "brand-text", businessName));
@@ -316,12 +310,11 @@ function renderHeader(data) {
 }
 
 function renderMonthBar(data) {
-  const { month, months, isCurrent } = data.monthView;
+  const { month, months } = data.monthView;
   byId("month-heading").textContent = monthLabel(month);
   const index = months.indexOf(month);
   byId("month-prev").disabled = index <= 0;
   byId("month-next").disabled = index === -1 || index >= months.length - 1;
-  byId("month-current").hidden = isCurrent;
 }
 
 function renderStats(data) {
@@ -375,16 +368,7 @@ function renderRequests(data) {
     return;
   }
 
-  list.replaceChildren(
-    ...data.pendingRequests.map((order) => {
-      const row = el("li", "row");
-      row.append(
-        orderMain(order, formatEventDate(order.eventDate, data.today), { showNote: true }),
-        el("p", "amount", formatMoney(order.total))
-      );
-      return row;
-    })
-  );
+  list.replaceChildren(...data.pendingRequests.map((order) => requestRow(order, data.today)));
 }
 
 function renderWeekMenu(data) {
@@ -480,6 +464,7 @@ function columnChart({ description, series, points, showTotals = true, labelEver
   points.forEach((point, index) => {
     const column = el("div", point.current ? "chart-col is-current" : "chart-col");
     column.title = point.title;
+    column.style.setProperty("--i", String(index));
     const stack = el("div", "chart-stack");
     stack.style.height = `${(point.total / max) * 100}%`;
     for (const entry of series) {
@@ -502,15 +487,16 @@ function columnChart({ description, series, points, showTotals = true, labelEver
 function barRows(entries) {
   const max = Math.max(1, ...entries.map((entry) => entry.value));
   const list = el("ul", "hbars");
-  for (const entry of entries) {
+  entries.forEach((entry, index) => {
     const item = el("li", "hbar");
+    item.style.setProperty("--i", String(index));
     const track = el("span", "hbar-track");
     const fill = el("span", "hbar-fill");
     fill.style.width = `${(entry.value / max) * 100}%`;
     track.append(fill);
     item.append(el("span", "hbar-label", entry.label), track, el("span", "hbar-value", String(entry.value)));
     list.append(item);
-  }
+  });
   return list;
 }
 
@@ -695,12 +681,20 @@ function renderView(data) {
   }
 
   if (view) {
-    byId("detail-title").textContent = `${detailTitles[view]} in ${monthLabel(data.monthView.month)}`;
+    // The detail view takes its tile's tone and icon, so the color carries over.
+    const tile = document.querySelector(`.stat[data-view="${view}"]`);
+    byId("detail-view").dataset.tone = tile.dataset.tone;
+    byId("detail-title").replaceChildren(
+      tile.querySelector(".well").cloneNode(true),
+      `${detailTitles[view]} in ${monthLabel(data.monthView.month)}`
+    );
     byId("detail-body").replaceChildren(...detailRenderers[view](data.monthView, data));
+    byId("detail-body").classList.toggle("is-revealing", revealCharts);
   }
+  revealCharts = false;
   document.title = view
-    ? `${detailTitles[view]} · ${data.caterer.businessName}`
-    : `${data.caterer.businessName} · Dashboard`;
+    ? `${detailTitles[view]} · ${data.caterer.businessName} · Dishpatch`
+    : `${data.caterer.businessName} · Dishpatch`;
 }
 
 function render(data) {
@@ -759,6 +753,7 @@ function playFallback(kind) {
 // Data loading
 
 function showNotice({ title, body }) {
+  byId("skeleton").hidden = true;
   byId("notice-title").textContent = title;
   byId("notice-body").textContent = body;
   byId("notice").hidden = false;
@@ -802,6 +797,7 @@ async function loadDashboard(transition) {
       render(body);
       hasRendered = true;
       hideNotice();
+      byId("skeleton").hidden = true;
       for (const id of ["dashboard", "refresh-area", "footer"]) byId(id).hidden = false;
     };
     if (transition && hasRendered) withTransition(transition, apply);
@@ -829,6 +825,7 @@ function changeMonth(month) {
   const direction = month > lastData.monthView.month ? "next" : "prev";
   const isCurrent = month === lastData.today.slice(0, 7);
   selectedMonth = isCurrent ? null : month;
+  revealCharts = Boolean(currentView());
 
   const url = new URL(window.location.href);
   if (selectedMonth) url.searchParams.set("month", selectedMonth);
@@ -850,24 +847,20 @@ if (!catererId || !actorUserId) {
     body: "Open this page with your IDs in the address, for example /?catererId=<caterer id>&actorUserId=<owner user id>. The README lists the fictional development caterers."
   });
 } else {
-  for (const tile of document.querySelectorAll(".stat")) {
-    tile.append(icon("i-right", "icon stat-arrow"));
-  }
   byId("refresh-button").addEventListener("click", () => loadDashboard());
   byId("month-prev").addEventListener("click", () => stepMonth(-1));
   byId("month-next").addEventListener("click", () => stepMonth(1));
-  byId("month-current").addEventListener("click", () => {
-    if (lastData) changeMonth(lastData.today.slice(0, 7));
-  });
 
   window.addEventListener("hashchange", () => {
     if (!lastData) return;
+    revealCharts = Boolean(currentView());
     withTransition(currentView() ? "open" : "close", () => renderView(lastData));
   });
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && currentView()) window.location.hash = "home";
   });
 
+  revealCharts = Boolean(currentView());
   loadDashboard();
   setInterval(() => {
     if (!document.hidden && inFlight === 0) loadDashboard();

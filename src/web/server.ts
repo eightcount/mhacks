@@ -102,5 +102,5 @@ server.on("error", (error: NodeJS.ErrnoException) => {
 });
 
 server.listen(port, host, () => {
-  console.info(`Caterer dashboard running at http://localhost:${port}/`);
+  console.info(`Dishpatch caterer dashboard running at http://localhost:${port}/`);
 });

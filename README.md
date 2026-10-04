@@ -233,7 +233,7 @@ npm run dashboard    # local read-only caterer dashboard on http://localhost:300
 
 ## Caterer dashboard
 
-`npm run dashboard` serves a local, read-only dashboard for one caterer at `http://localhost:3000`. The server reads Neon through the TypeScript services (`getCatererDashboard`, which also uses `getMenu`), so `DATABASE_URL` stays on the server and the browser only calls the dashboard's JSON endpoint. It uses Node's built-in `http` module and binds to `127.0.0.1`.
+`npm run dashboard` serves a local, read-only Dishpatch dashboard for one caterer at `http://localhost:3000`. The server reads Neon through the TypeScript services (`getCatererDashboard`, which also uses `getMenu`), so `DATABASE_URL` stays on the server and the browser only calls the dashboard's JSON endpoint. It uses Node's built-in `http` module and binds to `127.0.0.1`.
 
 Open it with a caterer ID and the user ID of that caterer's owner. In the shared fictional data, caterer `22000000-0000-4000-8000-00000000000N` is owned by user `11000000-0000-4000-8000-00000000000N` for N = 1–5:
 
@@ -251,7 +251,7 @@ http://localhost:3000/?catererId=22000000-0000-4000-8000-000000000001&actorUserI
 
 The page shows only what a caterer needs day to day. Every figure comes from Neon records.
 
-The arrows beside the month at the top (and a **This month** shortcut) set the month for the four tiles and their detail views. Orders count toward the month of their event date and preorders toward their pickup or delivery date. The lists below the tiles always show what is happening now.
+The arrows beside the month at the top set the month for the four tiles and their detail views. Orders count toward the month of their event date and preorders toward their pickup or delivery date. The lists below the tiles always show what is happening now.
 
 - **Revenue:** stored order totals of `ACCEPTED` and `COMPLETED` orders in the month, split into completed and still to fill, with booked preorders shown separately. Payments are not tracked, so this is booked order value. Its detail view charts booked value for the six months ending with the selected month and lists the month's booked orders.
 - **Orders to fill:** `ACCEPTED` orders in the month, with guests and the next event. Its detail view charts guests by day, still to fill and already filled, and lists both groups of orders.
