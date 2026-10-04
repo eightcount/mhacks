@@ -31,8 +31,13 @@ Neon directly or generate arbitrary SQL.
 - A shared remote Neon development project exists and is the intended database
   for this repository's current development environment.
 - The base marketplace schema is applied to its `main` branch.
-- The remote database is currently empty; fictional seed data has **not** been
-  added to the shared database.
+- Fictional development data was loaded and verified on **2026-10-04 (UTC)**:
+  **9 customers, 5 caterers (4 active), 15 menu items, and 25 orders** covering
+  all six order statuses. Availability, order items, conversations, messages,
+  and structured request states are also populated.
+- The verified inventory and teammate/dashboard setup are documented in
+  [`dashboard-data.md`](dashboard-data.md). These counts describe the initial
+  seed; application activity can change them afterward.
 - Local `.env` values are ignored by Git and point to the database only on the
   machine where they were provisioned. They are not collaboration artifacts.
 
@@ -85,16 +90,22 @@ The application uses two local-only variables:
 ```dotenv
 DATABASE_URL=             # pooled application connection
 DATABASE_URL_UNPOOLED=    # direct connection for Drizzle migrations
+DATABASE_DRIVER=         # optional: neon or postgres
 ```
 
-`DATABASE_URL` supports normal app traffic. `DATABASE_URL_UNPOOLED` is used by
+`DATABASE_URL` supports normal app traffic. Neon URLs now use the official Neon
+WebSocket driver by default, including interactive transactions, so local
+application access works when TCP port 5432 is unavailable. Use Node.js 22+.
+`DATABASE_DRIVER=postgres` explicitly selects Postgres.js instead.
+`DATABASE_URL_UNPOOLED` is used by
 `npm run db:migrate` because migrations need a direct, session-capable Neon
-connection. Both values are secrets and belong only in a local secret manager or
+connection. Both connection URLs are secrets and belong only in a local secret manager or
 ignored `.env` file.
 
 The migration runner currently prefers `DATABASE_URL_UNPOOLED` and falls back to
 `DATABASE_URL` only when the direct value is unavailable. Keep `prepare: false`
-in the Postgres.js client for Neon/PgBouncer compatibility.
+in the Postgres.js migration client for Neon/PgBouncer compatibility. Migrations
+continue to use the direct Postgres.js connection; seeding does not run migrations.
 
 ## Collaborative access procedure
 
@@ -148,5 +159,13 @@ The current schema already supports core marketplace metrics:
 - order volume by date, caterer, and status
 - upcoming capacity/availability from `availability` joined to `caterers`
 
-Add dashboard authentication and a reporting boundary before exposing any of
-these metrics externally.
+`getMarketplaceSummary()` in `src/services/reporting.ts` now provides live
+database-backed aggregate counts and completed order value. A dashboard backend
+can call it from an authenticated route. `npm run db:summary` verifies the same
+reporting path locally without starting an HTTP server.
+
+Use the same shared development branch, provisioned through NLI, for each
+teammate's backend. Git transfers code; Neon holds the shared data. Pulling the
+repository does not copy credentials or automatically refresh a dashboard.
+
+Add dashboard authentication before exposing these metrics externally.

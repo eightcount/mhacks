@@ -12,6 +12,7 @@
     "db:migrate": "tsx src/db/migrate.ts",
     "db:seed": "tsx src/db/seed.ts",
     "db:verify": "tsx src/db/verify.ts",
+    "db:summary": "tsx src/db/summary.ts",
     "db:demo": "tsx src/db/demo.ts",
     "agent:backend": "tsx src/agent/internal-api.ts",
     "agent:cli": "python3 -m fetch_agent.local_cli",
@@ -20,6 +21,7 @@
     "test:agent": "python3 -m unittest fetch_agent.test_conversation"
   },
   "dependencies": {
+    "@neondatabase/serverless": "^1.2.0",
     "dotenv": "^16.6.1",
     "drizzle-orm": "^0.45.3",
     "postgres": "^3.4.7",

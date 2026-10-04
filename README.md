@@ -43,10 +43,15 @@ Useful official references:
 
 ## Prerequisites
 
-- Node.js 20+
+- Node.js 22+
 - npm 10+
 - Python 3.10+
 - A Neon PostgreSQL database and connection string
+
+The shared development database already contains fictional customers, caterers,
+menus, availability, and orders. For dashboard integration, follow
+[the shared-data setup](docs/dashboard-data.md) and obtain private access to the
+same development branch from NLI.
 
 ## Installation
 
@@ -92,7 +97,9 @@ FETCH_AGENT_SEED=
 
 ## Database setup
 
-Create and apply migrations, then add fictional development data:
+For a new, isolated development database, create and apply migrations, then add
+fictional development data. Shared development users should follow the handoff
+and use the data already loaded in Neon:
 
 ```bash
 npm run db:generate

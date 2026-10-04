@@ -1,7 +1,8 @@
-import { sql } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { closeDatabaseConnection, db } from "./index.js";
 import {
   availability,
+  cateringRequestStates,
   caterers,
   conversations,
   menuItems,
@@ -10,6 +11,16 @@ import {
   orders,
   users
 } from "./schema/index.js";
+import { calculateOrderTotal, centsToMoney, moneyToCents } from "../services/money.js";
+import { assertOrderTransition } from "../services/order-state.js";
+import { assessAvailability } from "../services/matching.js";
+import {
+  buildDashboardOrderPlans,
+  dashboardCustomers,
+  demoCatererIds,
+  offsetSeedDate,
+  seedId
+} from "./seed-data.js";
 
 const ids = {
   jadeOwner: "11000000-0000-4000-8000-000000000001",
@@ -44,7 +55,170 @@ const ids = {
   message: "77000000-0000-4000-8000-000000000001"
 } as const;
 
+type SeedTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+async function seedDashboardFixtures(tx: SeedTransaction, referenceDate: string): Promise<void> {
+  await tx.insert(users).values(dashboardCustomers).onConflictDoNothing({ target: users.id });
+  const plans = buildDashboardOrderPlans(referenceDate);
+  const seededCatererIds = [...demoCatererIds, ids.seoul];
+  const [profiles, storedMenuItems, existingOrders] = await Promise.all([
+    tx.select().from(caterers).where(inArray(caterers.id, seededCatererIds)).orderBy(caterers.id),
+    tx.select().from(menuItems).where(inArray(menuItems.catererId, seededCatererIds))
+      .orderBy(menuItems.id),
+    tx.select({ id: orders.id }).from(orders)
+      .where(inArray(orders.id, plans.map((plan) => plan.id)))
+  ]);
+  const existingOrderIds = new Set(existingOrders.map((order) => order.id));
+  const calendar = new Map<string, typeof availability.$inferInsert>();
+  for (const [index, profile] of profiles.entries()) {
+    for (let day = 1; day <= 30; day += 1) {
+      const date = offsetSeedDate(referenceDate, day);
+      calendar.set(`${profile.id}:${date}`, {
+        catererId: profile.id,
+        date,
+        available: profile.active && (day + index) % 7 !== 0,
+        capacityOverride: profile.maximumCapacity - index * 3
+      });
+    }
+  }
+  for (const plan of plans) {
+    const profile = profiles.find((entry) => entry.id === plan.catererId);
+    if (!profile) throw new Error("A fictional dashboard caterer is missing.");
+    calendar.set(`${profile.id}:${plan.eventDate}`, {
+      catererId: profile.id,
+      date: plan.eventDate,
+      available: profile.active,
+      capacityOverride: profile.maximumCapacity
+    });
+  }
+  await tx.insert(availability).values([...calendar.values()])
+    .onConflictDoNothing({ target: [availability.catererId, availability.date] });
+  const storedAvailability = await tx.select().from(availability)
+    .where(inArray(availability.catererId, seededCatererIds));
+
+  for (const plan of plans) {
+    if (existingOrderIds.has(plan.id)) continue;
+    const profile = profiles.find((entry) => entry.id === plan.catererId);
+    const selection = storedMenuItems
+      .filter((item) => item.catererId === plan.catererId && item.active).slice(0, 2);
+    const eventStyle = profile?.supportedEventStyles[0];
+    if (!profile?.active || !eventStyle || selection.length === 0) {
+      throw new Error("Fictional dashboard orders require an active caterer and menu.");
+    }
+    const dateAvailability = storedAvailability.find((entry) =>
+      entry.catererId === plan.catererId && entry.date === plan.eventDate
+    );
+    if (!assessAvailability(profile, dateAvailability, plan.guestCount).available) {
+      throw new Error("A fictional order requires availability and sufficient capacity.");
+    }
+    const selections = selection.map((item, index) => ({
+      menuItemId: item.id,
+      unitPrice: item.price,
+      quantity: index === 0 ? plan.guestCount : Math.ceil(plan.guestCount / 2)
+    }));
+    const fulfillmentMethod = profile.fulfillmentMethod === "DELIVERY" ? "DELIVERY" : "PICKUP";
+    const subtotal = calculateOrderTotal(selections);
+    const minimum = Math.max(
+      moneyToCents(profile.minimumOrder),
+      fulfillmentMethod === "DELIVERY" && profile.minimumDeliveryOrder
+        ? moneyToCents(profile.minimumDeliveryOrder) : 0
+    );
+    if (subtotal.cents < minimum) throw new Error("A fictional order is below the minimum order.");
+    const totalCents = subtotal.cents + (
+      fulfillmentMethod === "DELIVERY" && profile.deliveryFee ? moneyToCents(profile.deliveryFee) : 0
+    );
+    // These are fictional historical fixtures. Validate their simulated lifecycle.
+    if (plan.status !== "DRAFT") assertOrderTransition("DRAFT", "REQUESTED");
+    if (plan.status === "COMPLETED") {
+      assertOrderTransition("REQUESTED", "ACCEPTED");
+      assertOrderTransition("ACCEPTED", "COMPLETED");
+    } else if (plan.status !== "DRAFT" && plan.status !== "REQUESTED") {
+      assertOrderTransition("REQUESTED", plan.status);
+    }
+    const updatedAt = plan.status === "COMPLETED"
+      ? new Date(`${plan.eventDate}T18:00:00.000Z`) : plan.createdAt;
+    const [created] = await tx.insert(orders).values({
+      id: plan.id,
+      customerId: plan.customerId,
+      catererId: plan.catererId,
+      eventDate: plan.eventDate,
+      guestCount: plan.guestCount,
+      budget: centsToMoney(totalCents + 10_000),
+      estimatedTotal: centsToMoney(totalCents),
+      requestedDishes: selection.map((item) => item.name),
+      requestedCuisines: profile.cuisineTypes,
+      eventStyle,
+      dietaryRestrictions: [],
+      eventLocation: profile.location,
+      fulfillmentMethod,
+      status: plan.status,
+      specialRequests: "Fictional demo order for dashboard development.",
+      createdAt: plan.createdAt,
+      updatedAt
+    }).onConflictDoNothing({ target: orders.id }).returning({ id: orders.id });
+    if (created) {
+      await tx.insert(orderItems).values(selections.map((selection) => ({
+        orderId: created.id,
+        menuItemId: selection.menuItemId,
+        quantity: selection.quantity,
+        unitPrice: selection.unitPrice,
+        createdAt: plan.createdAt
+      }))).onConflictDoNothing({ target: [orderItems.orderId, orderItems.menuItemId] });
+    }
+  }
+
+  const seededOrders = await tx.select().from(orders)
+    .where(inArray(orders.id, [ids.order, ...plans.map((plan) => plan.id)]))
+    .orderBy(orders.id);
+  const customerIds = [ids.customer, ...dashboardCustomers.map((customer) => customer.id)];
+  for (const [index, customerId] of customerIds.entries()) {
+    const order = seededOrders.find((entry) => entry.customerId === customerId);
+    if (!order) throw new Error("A fictional customer has no dashboard order.");
+    const conversationId = seedId("66000000", index + 1);
+    await tx.insert(conversations).values({
+      id: conversationId,
+      userId: customerId,
+      externalConversationId: index === 0
+        ? "test:conversation:river-stone" : `test:conversation:dashboard-${index}`
+    }).onConflictDoNothing({ target: conversations.id });
+    await tx.insert(messages).values([
+      {
+        id: seedId("77000000", index * 2 + 2),
+        conversationId,
+        sender: "CUSTOMER",
+        content: `Fictional demo request: catering for ${order.guestCount} guests on ${order.eventDate}.`,
+        externalMessageId: `test:dashboard-message:${index}:customer`
+      },
+      {
+        id: seedId("77000000", index * 2 + 3),
+        conversationId,
+        sender: "SYSTEM",
+        content: `Fictional demo order status: ${order.status}.`,
+        externalMessageId: `test:dashboard-message:${index}:system`
+      }
+    ]).onConflictDoNothing({ target: messages.id });
+    await tx.insert(cateringRequestStates).values({
+      conversationId,
+      customerId,
+      eventDate: order.eventDate,
+      budget: order.budget,
+      dishes: order.requestedDishes,
+      cuisines: order.requestedCuisines,
+      headcount: order.guestCount,
+      eventStyle: order.eventStyle,
+      dietaryRestrictions: order.dietaryRestrictions,
+      dietaryRestrictionsConfirmed: true,
+      location: order.eventLocation,
+      fulfillmentMethod: order.fulfillmentMethod,
+      recentSearchResultIds: [order.catererId],
+      selectedCatererId: order.catererId,
+      pendingOrderId: order.id
+    }).onConflictDoNothing({ target: cateringRequestStates.conversationId });
+  }
+}
+
 async function seedDatabase(): Promise<void> {
+  const referenceDate = new Date().toISOString().slice(0, 10);
   try {
     await db.transaction(async (tx) => {
       await tx
@@ -184,27 +358,7 @@ async function seedDatabase(): Promise<void> {
             active: false
           }
         ])
-        .onConflictDoUpdate({
-          target: caterers.id,
-          set: {
-            ownerUserId: sql`excluded.owner_user_id`,
-            businessName: sql`excluded.business_name`,
-            description: sql`excluded.description`,
-            cuisineTypes: sql`excluded.cuisine_types`,
-            location: sql`excluded.location`,
-            serviceAreas: sql`excluded.service_areas`,
-            serviceRadius: sql`excluded.service_radius`,
-            minimumOrder: sql`excluded.minimum_order`,
-            maximumCapacity: sql`excluded.maximum_capacity`,
-            supportedEventStyles: sql`excluded.supported_event_styles`,
-            fulfillmentMethod: sql`excluded.fulfillment_method`,
-            deliveryRadius: sql`excluded.delivery_radius`,
-            deliveryFee: sql`excluded.delivery_fee`,
-            minimumDeliveryOrder: sql`excluded.minimum_delivery_order`,
-            active: sql`excluded.active`,
-            updatedAt: new Date()
-          }
-        });
+        .onConflictDoNothing({ target: caterers.id });
 
       await tx
         .insert(menuItems)
@@ -330,18 +484,7 @@ async function seedDatabase(): Promise<void> {
             dietaryTags: ["VEGETARIAN", "VEGAN", "GLUTEN_FREE"]
           }
         ])
-        .onConflictDoUpdate({
-          target: menuItems.id,
-          set: {
-            catererId: sql`excluded.caterer_id`,
-            name: sql`excluded.name`,
-            description: sql`excluded.description`,
-            price: sql`excluded.price`,
-            dietaryTags: sql`excluded.dietary_tags`,
-            active: sql`excluded.active`,
-            updatedAt: new Date()
-          }
-        });
+        .onConflictDoNothing({ target: menuItems.id });
 
       await tx
         .insert(availability)
@@ -357,14 +500,14 @@ async function seedDatabase(): Promise<void> {
           { catererId: ids.seoul, date: "2030-06-15", available: true, capacityOverride: 55 },
           { catererId: ids.seoul, date: "2030-06-22", available: true, capacityOverride: 60 }
         ])
-        .onConflictDoUpdate({
-          target: [availability.catererId, availability.date],
-          set: {
-            available: sql`excluded.available`,
-            capacityOverride: sql`excluded.capacity_override`,
-            updatedAt: new Date()
-          }
-        });
+        .onConflictDoNothing({ target: [availability.catererId, availability.date] });
+
+      const [demoMenuItem] = await tx.select().from(menuItems)
+        .where(and(eq(menuItems.id, ids.jadeMenuOne), eq(menuItems.catererId, ids.jade)));
+      const [demoCaterer] = await tx.select().from(caterers).where(eq(caterers.id, ids.jade));
+      if (!demoMenuItem || !demoCaterer) throw new Error("Fictional demo catalog is missing.");
+      const demoSubtotal = calculateOrderTotal([{ quantity: 30, unitPrice: demoMenuItem.price }]);
+      const demoTotalCents = demoSubtotal.cents + moneyToCents(demoCaterer.deliveryFee ?? "0.00");
 
       await tx
         .insert(orders)
@@ -374,8 +517,8 @@ async function seedDatabase(): Promise<void> {
           catererId: ids.jade,
           eventDate: "2030-06-15",
           guestCount: 30,
-          budget: "450.00",
-          estimatedTotal: "370.00",
+          budget: centsToMoney(Math.max(45_000, demoTotalCents)),
+          estimatedTotal: centsToMoney(demoTotalCents),
           requestedDishes: ["dumplings"],
           requestedCuisines: ["Chinese"],
           eventStyle: "BUFFET",
@@ -385,26 +528,7 @@ async function seedDatabase(): Promise<void> {
           status: "REQUESTED",
           specialRequests: "Please include vegetarian serving labels."
         })
-        .onConflictDoUpdate({
-          target: orders.id,
-          set: {
-            customerId: sql`excluded.customer_id`,
-            catererId: sql`excluded.caterer_id`,
-            eventDate: sql`excluded.event_date`,
-            guestCount: sql`excluded.guest_count`,
-            budget: sql`excluded.budget`,
-            estimatedTotal: sql`excluded.estimated_total`,
-            requestedDishes: sql`excluded.requested_dishes`,
-            requestedCuisines: sql`excluded.requested_cuisines`,
-            eventStyle: sql`excluded.event_style`,
-            dietaryRestrictions: sql`excluded.dietary_restrictions`,
-            eventLocation: sql`excluded.event_location`,
-            fulfillmentMethod: sql`excluded.fulfillment_method`,
-            status: sql`excluded.status`,
-            specialRequests: sql`excluded.special_requests`,
-            updatedAt: new Date()
-          }
-        });
+        .onConflictDoNothing({ target: orders.id });
 
       await tx
         .insert(orderItems)
@@ -413,7 +537,7 @@ async function seedDatabase(): Promise<void> {
           orderId: ids.order,
           menuItemId: ids.jadeMenuOne,
           quantity: 30,
-          unitPrice: "11.50"
+          unitPrice: demoMenuItem.price
         })
         .onConflictDoNothing({ target: orderItems.id });
 
@@ -436,9 +560,11 @@ async function seedDatabase(): Promise<void> {
           externalMessageId: "test:message:river-stone:001"
         })
         .onConflictDoNothing({ target: messages.id });
+
+      await seedDashboardFixtures(tx, referenceDate);
     });
 
-    console.info("Fictional seed data completed.");
+    console.info(`Fictional seed data completed; dashboard reference date: ${referenceDate}.`);
   } finally {
     await closeDatabaseConnection();
   }

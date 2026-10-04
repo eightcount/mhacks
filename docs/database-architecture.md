@@ -81,8 +81,15 @@ support core metrics without a duplicate analytics table:
 - orders by status/date/caterer: indexed fields on `orders`
 - upcoming capacity and availability: `availability` joined to `caterers`
 
-Add a reporting service and authentication boundary when the dashboard is built;
-do not expose raw database credentials or database access to a client.
+`src/services/reporting.ts` provides `getMarketplaceSummary()` for database-backed
+counts, order statuses, and completed order value. Integrate it in an authenticated
+server route when the dashboard is built. The shared fictional data and teammate
+setup are described in [dashboard-data.md](dashboard-data.md).
+
+Neon application URLs automatically use the official WebSocket driver with
+transaction support; `DATABASE_DRIVER=postgres` selects the original Postgres.js
+transport. Migration connections still use Postgres.js and the direct URL.
+Use Node.js 22+ and keep database access on the server.
 
 ## Applying the schema
 
@@ -99,4 +106,6 @@ npm run db:seed
 npm run db:verify
 ```
 
-Seed data is entirely fictional and is for local/demo verification only.
+Seed data is entirely fictional and is for shared development/demo verification.
+It has already been loaded into the shared development database. Repeated seed
+runs preserve existing records and add only missing fixtures and availability.
