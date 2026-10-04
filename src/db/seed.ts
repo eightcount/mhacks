@@ -21,6 +21,7 @@ import {
   offsetSeedDate,
   seedId
 } from "./seed-data.js";
+import { seedVarietyFixtures } from "./seed-variety.js";
 
 const ids = {
   jadeOwner: "11000000-0000-4000-8000-000000000001",
@@ -220,7 +221,7 @@ async function seedDashboardFixtures(tx: SeedTransaction, referenceDate: string)
 async function seedDatabase(): Promise<void> {
   const referenceDate = new Date().toISOString().slice(0, 10);
   try {
-    await db.transaction(async (tx) => {
+    const added = await db.transaction(async (tx) => {
       await tx
         .insert(users)
         .values([
@@ -562,9 +563,11 @@ async function seedDatabase(): Promise<void> {
         .onConflictDoNothing({ target: messages.id });
 
       await seedDashboardFixtures(tx, referenceDate);
+      return seedVarietyFixtures(tx, referenceDate);
     });
 
     console.info(`Fictional seed data completed; dashboard reference date: ${referenceDate}.`);
+    console.info(`Added variety fixtures: ${JSON.stringify(added)}`);
   } finally {
     await closeDatabaseConnection();
   }

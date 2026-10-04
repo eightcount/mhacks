@@ -1,7 +1,8 @@
 import { count } from "drizzle-orm";
 import { closeDatabaseConnection, db } from "./index.js";
 import {
-  availability, cateringRequestStates, caterers, conversations,
+  availability, catererAgentSessions, catererNotificationDrafts, catererOrderForms,
+  catererPreorders, catererProductSpecs, cateringRequestStates, caterers, conversations,
   menuItems, messages, orderItems, orders, users
 } from "./schema/index.js";
 
@@ -9,7 +10,9 @@ async function verifyDatabase(): Promise<void> {
   try {
     const tables = {
       users, caterers, menuItems, availability, orders, orderItems,
-      conversations, messages, cateringRequestStates
+      conversations, messages, cateringRequestStates,
+      catererProductSpecs, catererOrderForms, catererPreorders,
+      catererNotificationDrafts, catererAgentSessions
     };
     const counts = await Promise.all(Object.entries(tables).map(async ([name, table]) => {
       const [row] = await db.select({ count: count() }).from(table);

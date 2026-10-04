@@ -29,6 +29,38 @@ for completed fixtures, and the existing repeatable June 2030 demo dates.
 Amounts use decimal dollar strings and integer-cent calculations. Order prices
 come from the stored menu and are copied into order items as historical snapshots.
 
+## Variety fixtures
+
+On **2026-10-04 (UTC)** an additive set of fictional "variety" fixtures was
+seeded so each dashboard tells a different story. It lives in
+`src/db/seed-variety-data.ts` (deterministic plans, unit-tested) and
+`src/db/seed-variety.ts` (validated inserts), and `npm run db:seed` loads it in
+the same transaction as the fixtures above.
+
+| Added | Records |
+| --- | ---: |
+| Customers | 10 |
+| Menu items (2 seasonal, inactive) | 12 |
+| Catering orders across six months back and six weeks ahead | 95 |
+| Recipe and container definitions | 11 |
+| Order forms (open, closed to orders, fulfilled, and paused) | 12 |
+| Preorders | 59 |
+| Customer notifications (draft, sent, and failed) | 31 |
+
+Each fixture passes the same rules the services enforce: menu items belong to
+the order's caterer and meet its dietary restrictions, event styles and
+fulfillment are supported, availability has room on the event date, orders meet
+minimums, preorder packages stay within each form's limit, and every status is
+reachable through legal transitions. Inactive menu items appear only in
+completed historical orders. Prices are read from the stored menu and copied as
+snapshots. Event dates may move by a few days to avoid a closed or already
+booked date.
+
+After this run, `npm run db:verify` reported 24 users, 27 menu items, 236
+availability entries, 122 orders, 233 order items, 12 product specs, 13 order
+forms, 60 preorders, and 32 notification drafts, including rows teammates
+created through the app. A repeat run on the same day adds nothing.
+
 ## Teammate setup
 
 1. Pull `main` and use Node.js 22+.
@@ -67,6 +99,11 @@ const menu = await getMenu(catererId);
 Expose these calls through your dashboard's authenticated server routes. Enforce
 the signed-in user's access to order details in those routes. Keep `DATABASE_URL`
 on the server; the browser calls your backend.
+
+The caterer dashboard (`getCatererDashboard`) also reads the caterer's order
+forms, preorders, notification drafts, and recipe revisions after the same
+ownership check. See the README's caterer dashboard section for what each
+figure means.
 
 The summary returns customer/caterer/menu counts, counts for all six order
 statuses, a decimal-string `completedOrderValue`, and `generatedAt`. Completed
