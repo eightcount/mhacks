@@ -53,9 +53,27 @@ Do not rebuild this schema manually in a dashboard. The authoritative files are:
   messaging schema
 - `drizzle/0001_add_catering_request_states.sql` — persisted conversational
   request state
+- `drizzle/0002_caterer_operations.sql` — caterer product definitions, forms,
+  preorders, notification drafts, and agent sessions
 - `src/db/migrate.ts` — migration runner
 
-The two committed migrations create these application tables:
+The additive `drizzle/0002_caterer_operations.sql` migration introduces caterer
+product/container definitions, order forms, preorders, notification drafts, and
+agent sessions. After isolated-branch testing and explicit user approval, it was
+applied to the shared development database using Drizzle's session-capable Neon
+WebSocket migrator with the direct connection. All five tables, eight foreign keys,
+and the recorded migration hash were verified. Existing marketplace record counts
+were unchanged. See the [caterer database services](../src/services/caterer-operations.ts).
+
+| Caterer operations table | Responsibility |
+| --- | --- |
+| `caterer_product_specs` | Immutable recipe and container revisions belonging to a caterer's menu items. |
+| `caterer_order_forms` | Published product and price snapshots, fulfillment details, and package limits. |
+| `caterer_preorders` | Requested orders, customer fulfillment details, and historical item snapshots. |
+| `caterer_notification_drafts` | Customer notification drafts and delivery-attempt status. |
+| `caterer_agent_sessions` | Structured draft state scoped to a caterer and session. |
+
+The two base migrations create these application tables:
 
 | Area | Tables | Responsibility |
 | --- | --- | --- |
@@ -142,10 +160,13 @@ For an agent without database credentials:
 6. Run relevant tests, type-checking, and build steps.
 7. Document the change in the pull request without exposing connection data.
 
-The base schema was applied remotely through a reviewed Neon migration workflow
-after the local Postgres client path timed out. Once direct local connectivity is
-available, run `npm run db:migrate`; the current base migrations are idempotent
-and that run will establish Drizzle's migration history for future changes.
+The base schema was initially applied remotely after the local Postgres client
+path timed out. Applying `0002_caterer_operations` has now established Drizzle's
+migration history for all three migrations on shared development. The standard
+`npm run db:migrate` command still uses direct TCP; this environment used the
+official `drizzle-orm/neon-serverless/migrator` with a WebSocket pool and the direct
+connection because TCP timed out. Future changes must follow the same isolated
+branch testing and shared-branch approval workflow.
 
 ## Reporting and dashboard boundary
 

@@ -5,6 +5,7 @@ import {
   date,
   index,
   integer,
+  jsonb,
   numeric,
   pgEnum,
   pgTable,
@@ -21,6 +22,8 @@ import {
   orderStatuses,
   userRoles
 } from "../../types/domain.js";
+import type { ProductSpec } from "../../validation/caterer-operations.js";
+import type { FormProduct, PreorderItem } from "../../types/caterer-operations.js";
 
 export const userRoleEnum = pgEnum("user_role", userRoles);
 export const orderStatusEnum = pgEnum("order_status", orderStatuses);
@@ -295,3 +298,67 @@ export const cateringRequestStates = pgTable(
     )
   ]
 );
+
+// Product definitions are immutable revisions so fulfilled orders retain the
+// recipe/container definition used when their order form was published.
+export const catererProductSpecs = pgTable("caterer_product_specs", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  catererId: uuid("caterer_id").notNull().references(() => caterers.id, {onDelete: "restrict"}),
+  menuItemId: uuid("menu_item_id").notNull().references(() => menuItems.id, {onDelete: "restrict"}),
+  productName: text("product_name").notNull(),
+  spec: jsonb("spec").$type<ProductSpec>().notNull(),
+  createdAt: timestamp("created_at", {withTimezone: true}).defaultNow().notNull()
+}, table => [index("product_specs_caterer_menu_index").on(table.catererId, table.menuItemId)]);
+
+export const catererOrderForms = pgTable("caterer_order_forms", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  catererId: uuid("caterer_id").notNull().references(() => caterers.id, {onDelete: "restrict"}),
+  title: text("title").notNull(),
+  fulfillmentDate: date("fulfillment_date").notNull(),
+  closesAt: timestamp("closes_at", {withTimezone: true}).notNull(),
+  fulfillmentMethod: fulfillmentMethodEnum("fulfillment_method").notNull(),
+  fulfillmentInstructions: text("fulfillment_instructions").notNull(),
+  minimumOrder: numeric("minimum_order", {precision: 12, scale: 2}).notNull(),
+  deliveryFee: numeric("delivery_fee", {precision: 12, scale: 2}).notNull(),
+  products: jsonb("products").$type<FormProduct[]>().notNull(),
+  active: boolean("active").default(true).notNull(),
+  ...timestamps
+}, table => [index("order_forms_caterer_date_index").on(table.catererId, table.fulfillmentDate),
+  check("order_forms_minimum_nonnegative", sql`${table.minimumOrder} >= 0`),
+  check("order_forms_delivery_fee_nonnegative", sql`${table.deliveryFee} >= 0`)]);
+
+export const catererPreorders = pgTable("caterer_preorders", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  formId: uuid("form_id").notNull().references(() => catererOrderForms.id, {onDelete: "restrict"}),
+  catererId: uuid("caterer_id").notNull().references(() => caterers.id, {onDelete: "restrict"}),
+  submissionId: uuid("submission_id").notNull(),
+  customerName: text("customer_name").notNull(),
+  customerContact: text("customer_contact").notNull(),
+  deliveryAddress: text("delivery_address").notNull(),
+  fulfillmentDate: date("fulfillment_date").notNull(),
+  items: jsonb("items").$type<PreorderItem[]>().notNull(),
+  total: numeric("total", {precision: 12, scale: 2}).notNull(),
+  status: orderStatusEnum("status").default("REQUESTED").notNull(),
+  ...timestamps
+}, table => [uniqueIndex("preorders_form_submission_unique").on(table.formId, table.submissionId),
+  index("preorders_caterer_date_status_index").on(table.catererId, table.fulfillmentDate, table.status),
+  check("preorders_total_nonnegative", sql`${table.total} >= 0`)]);
+
+export const catererNotificationDrafts = pgTable("caterer_notification_drafts", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  catererId: uuid("caterer_id").notNull().references(() => caterers.id, {onDelete: "restrict"}),
+  orderId: uuid("order_id").notNull().references(() => catererPreorders.id, {onDelete: "restrict"}),
+  recipient: text("recipient").notNull(),
+  body: text("body").notNull(),
+  status: text("status").default("DRAFT").notNull(),
+  ...timestamps
+}, table => [index("notification_drafts_caterer_index").on(table.catererId),
+  check("notification_drafts_status_valid", sql`${table.status} in ('DRAFT', 'SENDING', 'SENT', 'FAILED')`)]);
+
+export const catererAgentSessions = pgTable("caterer_agent_sessions", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  catererId: uuid("caterer_id").notNull().references(() => caterers.id, {onDelete: "restrict"}),
+  sessionId: varchar("session_id", {length: 200}).notNull(),
+  draft: jsonb("draft").$type<Record<string, unknown>>().default({}).notNull(),
+  ...timestamps
+}, table => [uniqueIndex("caterer_agent_sessions_caterer_session_unique").on(table.catererId, table.sessionId)]);
