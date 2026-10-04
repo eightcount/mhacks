@@ -1,6 +1,16 @@
 import { and, eq, gte, inArray, lte, ne } from "drizzle-orm";
 import { db } from "../db/index.js";
-import { availability, menuItems, orderItems, orders, users } from "../db/schema/index.js";
+import {
+  availability,
+  catererNotificationDrafts,
+  catererOrderForms,
+  catererPreorders,
+  catererProductSpecs,
+  menuItems,
+  orderItems,
+  orders,
+  users
+} from "../db/schema/index.js";
 import {
   getCatererDashboardSchema,
   type GetCatererDashboardInput
@@ -38,10 +48,24 @@ async function loadOrderDetails(orderIds: string[], customerIds: string[]) {
   return { itemRows, customerRows };
 }
 
+/** The caterer's order forms, preorders, notification drafts, and recipe revisions. */
+async function loadOperations(catererId: string) {
+  const [forms, preorders, notifications, productSpecs] = await Promise.all([
+    db.select().from(catererOrderForms).where(eq(catererOrderForms.catererId, catererId)),
+    db.select().from(catererPreorders).where(eq(catererPreorders.catererId, catererId)),
+    db
+      .select()
+      .from(catererNotificationDrafts)
+      .where(eq(catererNotificationDrafts.catererId, catererId)),
+    db.select().from(catererProductSpecs).where(eq(catererProductSpecs.catererId, catererId))
+  ]);
+  return { forms, preorders, notifications, productSpecs };
+}
+
 /**
  * Read-only dashboard for a caterer owner, built from the caterer's stored
- * orders, menu, and availability. Draft orders are excluded because they have
- * not been sent to the caterer yet.
+ * orders, menu, availability, order forms, and preorders. Draft orders are
+ * excluded because they have not been sent to the caterer yet.
  */
 export async function getCatererDashboard(
   input: GetCatererDashboardInput
@@ -51,7 +75,7 @@ export async function getCatererDashboard(
   const today = parsed.today ?? localIsoDate(new Date());
   const window = availabilityPeriod(today);
 
-  const [[owner], catererOrders, menu, availabilityEntries] = await Promise.all([
+  const [[owner], catererOrders, menu, availabilityEntries, operations] = await Promise.all([
     db
       .select({ name: users.name })
       .from(users)
@@ -71,7 +95,8 @@ export async function getCatererDashboard(
           gte(availability.date, window.start),
           lte(availability.date, window.end)
         )
-      )
+      ),
+    loadOperations(caterer.id)
   ]);
 
   const { itemRows, customerRows } = await loadOrderDetails(
@@ -98,6 +123,11 @@ export async function getCatererDashboard(
     orders: records,
     menu,
     availability: availabilityEntries,
+    // A dashboard viewed as of another date judges open forms at noon UTC that day.
+    operations: {
+      ...operations,
+      now: parsed.today ? new Date(`${parsed.today}T12:00:00.000Z`) : new Date()
+    },
     today
   });
 }

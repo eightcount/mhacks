@@ -20,6 +20,16 @@ export function centsToMoney(cents: number): string {
   return `${Math.floor(cents / 100)}.${String(cents % 100).padStart(2, "0")}`;
 }
 
+/** Money in both integer cents (for arithmetic) and a decimal string (for display). */
+export interface MoneyAmount {
+  cents: number;
+  amount: string;
+}
+
+export function toMoneyAmount(cents: number): MoneyAmount {
+  return { cents, amount: centsToMoney(cents) };
+}
+
 export function calculateOrderTotal(
   selections: ReadonlyArray<{ quantity: number; unitPrice: string | number }>
 ): { cents: number; amount: string } {

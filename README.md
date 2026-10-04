@@ -194,25 +194,35 @@ npm run dashboard    # local read-only caterer dashboard on http://localhost:300
 
 `npm run dashboard` serves a local, read-only dashboard for one caterer at `http://localhost:3000`. The server reads Neon through the TypeScript services (`getCatererDashboard`, which also uses `getMenu`), so `DATABASE_URL` stays on the server and the browser only calls the dashboard's JSON endpoint. It uses Node's built-in `http` module and binds to `127.0.0.1`.
 
-Open it with a caterer ID and the user ID of that caterer's owner. In the shared fictional data, caterer `22000000-0000-4000-8000-00000000000N` is owned by user `11000000-0000-4000-8000-00000000000N` for N = 1–5: Jade Juniper Kitchen, Copper Cactus Taqueria, Verdant Table Collective, Saffron Harbor Mezze, and the inactive Seoul Meadow Supper Club. For example:
+Open it with a caterer ID and the user ID of that caterer's owner. In the shared fictional data, caterer `22000000-0000-4000-8000-00000000000N` is owned by user `11000000-0000-4000-8000-00000000000N` for N = 1–5:
+
+| N | Caterer | What its fictional data shows |
+| --- | --- | --- |
+| 1 | Jade Juniper Kitchen | Growing month over month; three open order forms |
+| 2 | Copper Cactus Taqueria | Busy summer that has cooled; a nearly sold-out form closed to new orders |
+| 3 | Verdant Table Collective | Small, steady formal events; a paused order form |
+| 4 | Saffron Harbor Mezze | Fewer, larger events; sold-out preorder products |
+| 5 | Seoul Meadow Supper Club | Inactive, with no orders (empty states) |
 
 ```text
 http://localhost:3000/?catererId=22000000-0000-4000-8000-000000000001&actorUserId=11000000-0000-4000-8000-000000000001
 ```
 
-Every figure comes from Neon records:
+The page shows only what a caterer needs day to day. Every figure comes from Neon records:
 
-- **Revenue:** stored order totals of `ACCEPTED` and `COMPLETED` orders with an event date in the current month, split into completed and still to fill. Payments are not tracked, so this is booked order value.
+- **Revenue:** stored order totals of `ACCEPTED` and `COMPLETED` orders with an event date in the current month, split into completed and still to fill. Booked preorders for the month are shown separately. Payments are not tracked, so this is booked order value.
 - **Orders to fill** and **Upcoming:** `ACCEPTED` orders with an event date from today on.
-- **Customers:** distinct customers with an `ACCEPTED` or `COMPLETED` order.
+- **Awaiting your reply:** `REQUESTED` catering orders and preorders.
+- **Customers:** distinct customers with an `ACCEPTED` or `COMPLETED` order, and how many have more than one.
 - **Pending requests:** `REQUESTED` orders waiting for the caterer, with event style, fulfillment, dietary restrictions, items, and special requests.
-- **Availability:** the next 14 days of `availability` records. Open days show the date's capacity override, or the caterer's maximum capacity, and the guests already booked. A day without a record shows *Not set*, which search treats as unavailable.
-- **Menu:** every menu item, including inactive ones, with its current price, dietary tags, and servings in booked orders.
-- **Order history:** completed, declined, and cancelled orders, plus accepted orders whose event date has passed.
+- **Customer notifications:** pickup and delivery notification drafts (`caterer_notification_drafts`), newest first, with counts by delivery status.
+- **Menu for the week:** the active menu, busiest first, with the servings in booked catering orders and the packages in booked preorders dated in the next seven days, starting today. An inactive item appears only if something is still booked for it.
+
+The JSON endpoint also returns availability, booked value by month, the order pipeline, order forms, a production plan, request mix, top customers, the full menu, and order history for other clients; the page doesn't display them.
 
 Draft orders are hidden because the customer has not submitted them. Order lines use each order item's stored price snapshot, and money is added in integer cents.
 
-The page refreshes every 30 seconds and when its tab regains focus, so orders created or changed through the agent's tools appear without agent-specific dashboard code. Add `&today=YYYY-MM-DD` to view the dashboard as of another date. The JSON is at `GET /api/caterers/:catererId/dashboard?actorUserId=...`. Set `DASHBOARD_PORT` to use a port other than 3000.
+The page refreshes every 30 seconds and when its tab regains focus, so orders created or changed through the agent's tools appear without agent-specific dashboard code. Add `&today=YYYY-MM-DD` to view the dashboard as of another date; order forms are then judged open or closed as of noon UTC that day. The JSON is at `GET /api/caterers/:catererId/dashboard?actorUserId=...`. Set `DASHBOARD_PORT` to use a port other than 3000.
 
 Until authentication exists, the owner check uses the same actor-ID boundary as the other caterer services: the caller states who they are in the URL. Keep the server local; do not expose it publicly.
 

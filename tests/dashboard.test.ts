@@ -7,6 +7,11 @@ import {
   type DashboardOrderRecord,
   type DashboardSource
 } from "../src/services/dashboard-summary.js";
+import type {
+  PreorderRecord,
+  PreorderSource,
+  ProductSpecRecord
+} from "../src/services/dashboard-preorders.js";
 import { getCatererDashboardSchema } from "../src/validation/index.js";
 
 const catererId = "22000000-0000-4000-8000-000000000001";
@@ -121,6 +126,58 @@ function summarize(
   });
 }
 
+function operations(overrides: Partial<PreorderSource> = {}): PreorderSource {
+  return {
+    forms: [],
+    preorders: [],
+    notifications: [],
+    productSpecs: [],
+    now: new Date("2030-06-12T12:00:00.000Z"),
+    ...overrides
+  };
+}
+
+let preorderSequence = 0;
+
+function preorder(overrides: Partial<PreorderRecord> & Pick<PreorderRecord, "status" | "fulfillmentDate">): PreorderRecord {
+  preorderSequence += 1;
+  return {
+    id: `8c000000-0000-4000-8000-${String(preorderSequence).padStart(12, "0")}`,
+    formId: "8b000000-0000-4000-8000-000000000001",
+    catererId,
+    submissionId: `8e000000-0000-4000-8000-${String(preorderSequence).padStart(12, "0")}`,
+    customerName: "Harper Quill",
+    customerContact: "test:customer:preorder",
+    deliveryAddress: "",
+    items: [],
+    total: "0.00",
+    createdAt: new Date("2030-06-01T00:00:00.000Z"),
+    updatedAt: new Date("2030-06-01T00:00:00.000Z"),
+    ...overrides
+  };
+}
+
+function productSpec(menuItemId: string, container: string, createdAt: Date): ProductSpecRecord {
+  return {
+    id: `8a000000-0000-4000-8000-${String(createdAt.getTime()).slice(-12)}`,
+    catererId,
+    menuItemId,
+    productName: menuNames[menuItemId] ?? "Item",
+    spec: {
+      menuItemId,
+      container: { name: container, capacity: { amount: "12", unit: "each" }, fill: { amount: "12", unit: "each" } },
+      recipe: {
+        name: "Fictional recipe",
+        yield: { amount: "60", unit: "each" },
+        ingredients: [{ name: "Flour", measure: { amount: "500", unit: "g" } }],
+        allergens: ["wheat"],
+        storageInstructions: "Refrigerate"
+      }
+    },
+    createdAt
+  };
+}
+
 describe("dashboard periods", () => {
   it("handles months that cross boundaries", () => {
     expect(monthContaining("2028-02-10")).toEqual({ start: "2028-02-01", end: "2028-02-29" });
@@ -182,7 +239,7 @@ describe("caterer dashboard summary", () => {
       record({ status: "REQUESTED", eventDate: "2030-06-20", customerId: requestingCustomer })
     ]);
 
-    expect(dashboard.stats.customers).toEqual({ total: 2, bookedThisMonth: 1 });
+    expect(dashboard.stats.customers).toEqual({ total: 2, bookedThisMonth: 1, repeat: 1 });
   });
 
   it("lists accepted orders from today on as upcoming orders to fill", () => {
@@ -323,7 +380,8 @@ describe("caterer dashboard summary", () => {
       dietaryTags: ["VEGETARIAN", "VEGAN", "GLUTEN_FREE"],
       active: true,
       servingsBooked: 35,
-      orderCount: 2
+      orderCount: 2,
+      recipe: null
     });
   });
 
@@ -350,6 +408,144 @@ describe("caterer dashboard summary", () => {
     expect(dashboard.availability.days[0]?.status).toBe("NOT_SET");
   });
 
+  it("charts booked catering and preorder value by month around today", () => {
+    const dashboard = summarize(
+      [
+        record({ status: "COMPLETED", eventDate: "2030-01-10", estimatedTotal: "100.00" }),
+        record({ status: "COMPLETED", eventDate: "2030-03-01", estimatedTotal: "250.50" }),
+        record({ status: "ACCEPTED", eventDate: "2030-07-04", estimatedTotal: "80.00" }),
+        record({ status: "REQUESTED", eventDate: "2030-06-20", estimatedTotal: "999.00" }),
+        record({ status: "COMPLETED", eventDate: "2029-12-31", estimatedTotal: "999.00" })
+      ],
+      {
+        operations: operations({
+          preorders: [
+            preorder({ status: "COMPLETED", fulfillmentDate: "2030-06-02", total: "40.25" }),
+            preorder({ status: "DECLINED", fulfillmentDate: "2030-06-05", total: "999.00" })
+          ]
+        })
+      }
+    );
+
+    expect(dashboard.trend.map((month) => month.month)).toEqual([
+      "2030-01", "2030-02", "2030-03", "2030-04", "2030-05", "2030-06", "2030-07", "2030-08"
+    ]);
+    expect(dashboard.trend.map((month) => month.total.amount)).toEqual([
+      "100.00", "0.00", "250.50", "0.00", "0.00", "40.25", "80.00", "0.00"
+    ]);
+    expect(dashboard.trend[5]).toMatchObject({
+      catering: { cents: 0 },
+      preorders: { cents: 4_025 },
+      orderCount: 0,
+      preorderCount: 1
+    });
+  });
+
+  it("reports the order pipeline, acceptance rate, and booked averages", () => {
+    const dashboard = summarize([
+      record({ status: "COMPLETED", eventDate: "2030-05-01", estimatedTotal: "100.00", guestCount: 10 }),
+      record({ status: "ACCEPTED", eventDate: "2030-06-20", estimatedTotal: "200.01", guestCount: 25 }),
+      record({ status: "DECLINED", eventDate: "2030-06-21" }),
+      record({ status: "CANCELLED", eventDate: "2030-06-22" }),
+      record({ status: "REQUESTED", eventDate: "2030-06-23" }),
+      record({ status: "DRAFT", eventDate: "2030-06-24" })
+    ]);
+
+    expect(dashboard.pipeline).toEqual({
+      counts: { REQUESTED: 1, ACCEPTED: 1, COMPLETED: 1, DECLINED: 1, CANCELLED: 1 },
+      acceptanceRate: 67,
+      averageOrderValue: { cents: 15_001, amount: "150.01" },
+      averageGuestCount: 18
+    });
+  });
+
+  it("counts requested event styles, fulfillment, and dietary needs, most common first", () => {
+    const dashboard = summarize([
+      record({ status: "REQUESTED", eventDate: "2030-06-20", eventStyle: "FORMAL", dietaryRestrictions: ["VEGAN", "GLUTEN_FREE"] }),
+      record({ status: "COMPLETED", eventDate: "2030-05-01", eventStyle: "BUFFET", fulfillmentMethod: "DELIVERY", dietaryRestrictions: ["VEGAN"] }),
+      record({ status: "DECLINED", eventDate: "2030-06-21", eventStyle: "BUFFET" }),
+      record({ status: "DRAFT", eventDate: "2030-06-24", eventStyle: "CASUAL", dietaryRestrictions: ["HALAL"] })
+    ]);
+
+    expect(dashboard.mix).toEqual({
+      eventStyles: [{ value: "BUFFET", count: 2 }, { value: "FORMAL", count: 1 }],
+      fulfillment: [{ value: "PICKUP", count: 2 }, { value: "DELIVERY", count: 1 }],
+      dietary: [{ value: "VEGAN", count: 2 }, { value: "GLUTEN_FREE", count: 1 }]
+    });
+  });
+
+  it("ranks customers by booked value and counts repeat customers", () => {
+    const regular = "11000000-0000-4000-8000-000000000006";
+    const big = "11000000-0000-4000-8000-000000000007";
+    const dashboard = summarize([
+      { ...record({ status: "COMPLETED", eventDate: "2030-02-01", customerId: regular, estimatedTotal: "100.00" }), customerName: "River Stone" },
+      { ...record({ status: "ACCEPTED", eventDate: "2030-06-30", customerId: regular, estimatedTotal: "50.00" }), customerName: "River Stone" },
+      { ...record({ status: "COMPLETED", eventDate: "2030-04-01", customerId: big, estimatedTotal: "400.00" }), customerName: "Dana Cloud" },
+      { ...record({ status: "REQUESTED", eventDate: "2030-07-01", customerId: big, estimatedTotal: "900.00" }), customerName: "Dana Cloud" }
+    ]);
+
+    expect(dashboard.topCustomers).toEqual([
+      { customerId: big, name: "Dana Cloud", orderCount: 1, total: { cents: 40_000, amount: "400.00" }, lastEventDate: "2030-04-01" },
+      { customerId: regular, name: "River Stone", orderCount: 2, total: { cents: 15_000, amount: "150.00" }, lastEventDate: "2030-06-30" }
+    ]);
+    expect(dashboard.stats.customers.repeat).toBe(1);
+  });
+
+  it("shows each menu item's newest recipe and container", () => {
+    const dashboard = summarize([], {
+      operations: operations({
+        productSpecs: [
+          productSpec(dumplingsId, "old box", new Date("2030-01-01")),
+          productSpec(dumplingsId, "12-piece box", new Date("2030-02-01")),
+          { ...productSpec(friedRiceId, "other caterer box", new Date("2030-03-01")), catererId: otherCatererId }
+        ]
+      })
+    });
+
+    const recipes = Object.fromEntries(dashboard.menu.map((item) => [item.name, item.recipe]));
+    expect(recipes["Vegetable Dumplings"]).toEqual({ container: "12-piece box (12 each)", allergens: ["wheat"] });
+    expect(recipes["Ginger Scallion Fried Rice"]).toBeNull();
+  });
+
+  it("lists the week's menu with servings and preorder packages booked in the next seven days", () => {
+    const dumplingSpec = productSpec(dumplingsId, "12-piece box", new Date("2030-02-01"));
+    const dashboard = summarize(
+      [
+        record({ status: "ACCEPTED", eventDate: "2030-06-14" }, [[dumplingsId, 10], [friedRiceId, 5]]),
+        record({ status: "ACCEPTED", eventDate: "2030-06-18" }, [[dumplingsId, 4]]),
+        record({ status: "ACCEPTED", eventDate: "2030-06-19" }, [[dumplingsId, 100]]),
+        record({ status: "REQUESTED", eventDate: "2030-06-13" }, [[chickenId, 50]]),
+        record({ status: "COMPLETED", eventDate: "2030-06-01" }, [[chickenId, 70]])
+      ],
+      {
+        operations: operations({
+          productSpecs: [dumplingSpec],
+          preorders: [
+            preorder({
+              status: "ACCEPTED",
+              fulfillmentDate: "2030-06-15",
+              items: [{ productSpecId: dumplingSpec.id, name: "Vegetable Dumplings", unitPrice: "11.50", container: "12-piece box (12 each)", quantity: 3 }]
+            }),
+            preorder({
+              status: "REQUESTED",
+              fulfillmentDate: "2030-06-15",
+              items: [{ productSpecId: dumplingSpec.id, name: "Vegetable Dumplings", unitPrice: "11.50", container: "12-piece box (12 each)", quantity: 40 }]
+            })
+          ]
+        })
+      }
+    );
+
+    expect(dashboard.weekMenu.period).toEqual({ start: "2030-06-12", end: "2030-06-18" });
+    expect(
+      dashboard.weekMenu.items.map((item) => [item.name, item.servings, item.orderCount, item.preorderPackages])
+    ).toEqual([
+      ["Vegetable Dumplings", 14, 2, 3],
+      ["Ginger Scallion Fried Rice", 5, 1, 0],
+      ["Five-Spice Chicken", 0, 0, 0]
+    ]);
+  });
+
   it("returns an empty dashboard for a caterer without orders", () => {
     const dashboard = summarize([], { menu: [] });
 
@@ -363,7 +559,7 @@ describe("caterer dashboard summary", () => {
       active: true
     });
     expect(dashboard.stats).toEqual({
-      customers: { total: 0, bookedThisMonth: 0 },
+      customers: { total: 0, bookedThisMonth: 0, repeat: 0 },
       revenue: {
         month: { cents: 0, amount: "0.00" },
         completed: { cents: 0, amount: "0.00" },
@@ -378,5 +574,17 @@ describe("caterer dashboard summary", () => {
     expect(dashboard.history).toEqual([]);
     expect(dashboard.menu).toEqual([]);
     expect(dashboard.availability.days.every((day) => day.status === "NOT_SET")).toBe(true);
+    expect(dashboard.trend.every((month) => month.total.cents === 0)).toBe(true);
+    expect(dashboard.pipeline).toEqual({
+      counts: { REQUESTED: 0, ACCEPTED: 0, COMPLETED: 0, DECLINED: 0, CANCELLED: 0 },
+      acceptanceRate: null,
+      averageOrderValue: null,
+      averageGuestCount: null
+    });
+    expect(dashboard.mix).toEqual({ eventStyles: [], fulfillment: [], dietary: [] });
+    expect(dashboard.topCustomers).toEqual([]);
+    expect(dashboard.weekMenu.items).toEqual([]);
+    expect(dashboard.preorders.forms).toEqual([]);
+    expect(dashboard.preorders.production).toEqual([]);
   });
 });

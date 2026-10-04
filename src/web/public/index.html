@@ -29,6 +29,14 @@
         <circle cx="9" cy="7" r="4" />
         <path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
       </symbol>
+      <symbol id="i-inbox" viewBox="0 0 24 24">
+        <path d="M22 12h-6l-2 3h-4l-2-3H2" />
+        <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
+      </symbol>
+      <symbol id="i-alert" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="10" />
+        <path d="M12 8v4M12 16h.01" />
+      </symbol>
       <symbol id="i-refresh" viewBox="0 0 24 24">
         <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
         <path d="M21 3v5h-5" />
@@ -64,6 +72,7 @@
             </p>
             <p class="stat-value" id="revenue-total">–</p>
             <p class="stat-sub" id="revenue-sub"></p>
+            <p class="stat-sub" id="revenue-preorders"></p>
           </article>
           <article class="stat">
             <p class="stat-label">
@@ -71,6 +80,13 @@
             </p>
             <p class="stat-value" id="orders-to-fill">–</p>
             <p class="stat-sub" id="orders-sub"></p>
+          </article>
+          <article class="stat">
+            <p class="stat-label">
+              <svg class="icon" aria-hidden="true"><use href="#i-inbox" /></svg>Awaiting your reply
+            </p>
+            <p class="stat-value" id="awaiting-total">–</p>
+            <p class="stat-sub" id="awaiting-sub"></p>
           </article>
           <article class="stat">
             <p class="stat-label">
@@ -99,28 +115,20 @@
           </section>
         </div>
 
-        <section class="card" aria-labelledby="availability-heading">
+        <section class="card" aria-labelledby="notifications-heading">
           <div class="card-head">
-            <h2 id="availability-heading">Availability</h2>
-            <span class="muted" id="availability-range"></span>
+            <h2 id="notifications-heading">Customer notifications</h2>
+            <ul class="chips" id="notification-counts" aria-label="Notifications by status"></ul>
           </div>
-          <ol class="calendar" id="availability-list" aria-labelledby="availability-heading"></ol>
+          <ul class="rows scroll-list" id="notification-list" tabindex="0" aria-labelledby="notifications-heading"></ul>
         </section>
 
         <section class="card" aria-labelledby="menu-heading">
           <div class="card-head">
-            <h2 id="menu-heading">Menu</h2>
-            <span class="muted">By servings booked</span>
+            <h2 id="menu-heading">Menu for the week</h2>
+            <span class="muted" id="menu-range"></span>
           </div>
           <ol class="menu" id="menu-list" aria-labelledby="menu-heading"></ol>
-        </section>
-
-        <section class="card" aria-labelledby="history-heading">
-          <div class="card-head">
-            <h2 id="history-heading">Order history</h2>
-            <span class="muted">Past and closed orders</span>
-          </div>
-          <ul class="rows scroll-list" id="history-list" tabindex="0" aria-labelledby="history-heading"></ul>
         </section>
       </div>
     </main>

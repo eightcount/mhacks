@@ -1,6 +1,6 @@
 // Read-only caterer dashboard. Every figure comes from the dashboard API, which
-// calculates it from stored orders, menu items, and availability; this script
-// only formats and displays it.
+// calculates it from stored orders, menu items, preorders, and notifications;
+// this script only formats and displays it.
 
 const REFRESH_INTERVAL_MS = 30_000;
 
@@ -32,16 +32,18 @@ const dietaryLabels = {
 };
 
 const statusLabels = {
+  REQUESTED: { label: "Awaiting reply", className: "status-pending" },
   ACCEPTED: { label: "Accepted", className: "status-accepted" },
   COMPLETED: { label: "Completed", className: "status-completed" },
   DECLINED: { label: "Declined", className: "status-closed" },
   CANCELLED: { label: "Cancelled", className: "status-closed" }
 };
 
-const availabilityLabels = {
-  OPEN: "Open",
-  CLOSED: "Closed",
-  NOT_SET: "Not set"
+const notificationLabels = {
+  DRAFT: { label: "Draft", className: "status-pending" },
+  SENDING: { label: "Sending", className: "status-pending" },
+  SENT: { label: "Sent", className: "status-completed" },
+  FAILED: { label: "Failed", className: "status-failed" }
 };
 
 const errorMessages = {
@@ -89,8 +91,8 @@ function formatMoney({ cents }) {
   return remainder === 0 ? `$${dollars}` : `$${dollars}.${String(remainder).padStart(2, "0")}`;
 }
 
-function plural(count, word) {
-  return `${count.toLocaleString("en-US")} ${word}${count === 1 ? "" : "s"}`;
+function plural(count, word, pluralWord = `${word}s`) {
+  return `${count.toLocaleString("en-US")} ${count === 1 ? word : pluralWord}`;
 }
 
 /** Labels a stored code, falling back to readable text for values without a label. */
@@ -125,6 +127,17 @@ function formatEventDate(isoDate, todayIso) {
   });
 }
 
+/** Timestamps (not calendar dates) are shown in the viewer's time zone. */
+function formatTimestamp(isoTimestamp) {
+  return new Intl.DateTimeFormat("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  }).format(new Date(isoTimestamp));
+}
+
 function formatRange({ start, end }) {
   const sameMonth = start.slice(0, 7) === end.slice(0, 7);
   const startLabel = formatDate(start, { month: "short", day: "numeric" });
@@ -156,6 +169,26 @@ function tagList(values, labels) {
 
 function emptyState(text) {
   return el("li", "empty", text);
+}
+
+function statusPill(labels, value) {
+  const status = labels[value] ?? { label: label({}, value), className: "" };
+  const pill = el("span", `status ${status.className}`);
+  if (status.className === "status-failed") {
+    pill.append(icon("i-alert"));
+  }
+  pill.append(status.label);
+  return pill;
+}
+
+function icon(id) {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("class", "icon");
+  svg.setAttribute("aria-hidden", "true");
+  const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
+  use.setAttribute("href", `#${id}`);
+  svg.append(use);
+  return svg;
 }
 
 function dateChip(isoDate, todayIso) {
@@ -192,11 +225,7 @@ function orderMain(order, dateText, { showNote }) {
 function bookedOrderRow(order, todayIso, options) {
   const row = el("li", "row");
   const side = el("div", "row-side");
-  const status = statusLabels[order.status] ?? { label: label({}, order.status), className: "" };
-  side.append(
-    el("p", "amount", formatMoney(order.total)),
-    el("span", `status ${status.className}`, status.label)
-  );
+  side.append(el("p", "amount", formatMoney(order.total)), statusPill(statusLabels, order.status));
 
   row.append(
     dateChip(order.eventDate, todayIso),
@@ -207,19 +236,28 @@ function bookedOrderRow(order, todayIso, options) {
 }
 
 function renderStats(data) {
-  const { customers, revenue, ordersToFill } = data.stats;
+  const { customers, revenue, ordersToFill, pendingRequests } = data.stats;
+  const preorders = data.preorders.stats;
   const monthName = formatDate(data.month.start, { month: "long" });
 
   byId("revenue-total").textContent = formatMoney(revenue.month);
-  byId("revenue-sub").textContent = `${monthName} · ${formatMoney(revenue.completed)} completed, ${formatMoney(revenue.upcoming)} to fill`;
+  byId("revenue-sub").textContent = `${monthName} catering · ${formatMoney(revenue.completed)} completed, ${formatMoney(revenue.upcoming)} to fill`;
+  byId("revenue-preorders").textContent =
+    preorders.revenueMonth.cents > 0 ? `Plus ${formatMoney(preorders.revenueMonth)} in preorders` : "";
 
   byId("orders-to-fill").textContent = ordersToFill.count.toLocaleString("en-US");
   byId("orders-sub").textContent = ordersToFill.nextEventDate
     ? `${plural(ordersToFill.guestCount, "guest")} · next ${formatEventDate(ordersToFill.nextEventDate, data.today)}`
     : "No accepted orders coming up";
 
+  const awaiting = pendingRequests.count + preorders.awaitingReply;
+  byId("awaiting-total").textContent = awaiting.toLocaleString("en-US");
+  byId("awaiting-sub").textContent = awaiting === 0
+    ? "You're all caught up"
+    : `${plural(pendingRequests.count, "catering request")} · ${plural(preorders.awaitingReply, "preorder")}`;
+
   byId("customers-total").textContent = customers.total.toLocaleString("en-US");
-  byId("customers-sub").textContent = `${customers.bookedThisMonth.toLocaleString("en-US")} booked in ${monthName}`;
+  byId("customers-sub").textContent = `${customers.bookedThisMonth.toLocaleString("en-US")} booked in ${monthName} · ${customers.repeat.toLocaleString("en-US")} repeat`;
 }
 
 function renderUpcoming(data) {
@@ -255,71 +293,74 @@ function renderRequests(data) {
   );
 }
 
-function renderAvailability(data) {
-  byId("availability-range").textContent = formatRange(data.availability.period);
+function renderNotifications(data) {
+  const { counts, recent } = data.preorders.notifications;
+  byId("notification-counts").replaceChildren(
+    ...Object.entries(counts)
+      .filter(([, count]) => count > 0)
+      .map(([status, count]) => {
+        const chip = el("li", "chip");
+        chip.append(
+          el("strong", "", count.toLocaleString("en-US")),
+          el("span", "", (notificationLabels[status] ?? { label: status }).label)
+        );
+        return chip;
+      })
+  );
 
-  byId("availability-list").replaceChildren(
-    ...data.availability.days.map((day) => {
-      const tile = el("li", `day day-${day.status.toLowerCase().replaceAll("_", "-")}`);
-      if (day.date === data.today) {
-        tile.classList.add("is-today");
-        tile.setAttribute("aria-current", "date");
-      }
-      tile.append(
-        el("span", "day-dow", formatDate(day.date, { weekday: "short" })),
-        el("span", "day-dom", formatDate(day.date, { day: "numeric" })),
-        el("span", "day-status", label(availabilityLabels, day.status))
+  const list = byId("notification-list");
+  if (recent.length === 0) {
+    list.replaceChildren(emptyState("Pickup and delivery reminders you draft will show up here."));
+    return;
+  }
+  list.replaceChildren(
+    ...recent.map((notification) => {
+      const row = el("li", "row");
+      const main = el("div", "row-main");
+      main.append(
+        el("p", "row-title", notification.customerName),
+        el("p", "row-note", notification.body)
       );
-      if (day.capacity !== null) {
-        tile.append(el("span", "day-detail", `Up to ${plural(day.capacity, "guest")}`));
-      }
-      if (day.bookedGuests > 0) {
-        tile.append(el("span", "day-booked", `${day.bookedGuests.toLocaleString("en-US")} booked`));
-      }
-      return tile;
+      const side = el("div", "row-side");
+      side.append(
+        statusPill(notificationLabels, notification.status),
+        el("p", "row-sub", formatTimestamp(notification.updatedAt))
+      );
+      row.append(main, side);
+      return row;
     })
   );
 }
 
-function renderMenu(data) {
+function renderWeekMenu(data) {
+  byId("menu-range").textContent = formatRange(data.weekMenu.period);
   const list = byId("menu-list");
-  if (data.menu.length === 0) {
+  if (data.weekMenu.items.length === 0) {
     list.replaceChildren(emptyState("No menu items yet."));
     return;
   }
 
   list.replaceChildren(
-    ...data.menu.map((item) => {
+    ...data.weekMenu.items.map((item) => {
       const card = el("li", item.active ? "menu-item" : "menu-item is-inactive");
       card.title = item.description;
+      const booked = [];
+      if (item.servings > 0) {
+        booked.push(`${plural(item.servings, "serving")} · ${plural(item.orderCount, "order")}`);
+      }
+      if (item.preorderPackages > 0) {
+        booked.push(plural(item.preorderPackages, "preorder package"));
+      }
       card.append(
         el("p", "menu-price", `${item.active ? "" : "Inactive · "}${formatMoney(item.price)} each`),
         el("p", "menu-name", item.name),
-        el(
-          "p",
-          "menu-meta",
-          item.servingsBooked > 0
-            ? `${plural(item.servingsBooked, "serving")} booked · ${plural(item.orderCount, "order")}`
-            : "No servings booked yet"
-        )
+        el("p", "menu-meta", booked.length > 0 ? booked.join(" · ") : "Not booked this week")
       );
       if (item.dietaryTags.length > 0) {
         card.append(tagList(item.dietaryTags, dietaryLabels));
       }
       return card;
     })
-  );
-}
-
-function renderHistory(data) {
-  const list = byId("history-list");
-  if (data.history.length === 0) {
-    list.replaceChildren(emptyState("Completed, declined, and cancelled orders will show up here."));
-    return;
-  }
-
-  list.replaceChildren(
-    ...data.history.map((order) => bookedOrderRow(order, data.today, { showNote: false }))
   );
 }
 
@@ -344,9 +385,8 @@ function render(data) {
   renderStats(data);
   renderUpcoming(data);
   renderRequests(data);
-  renderAvailability(data);
-  renderMenu(data);
-  renderHistory(data);
+  renderNotifications(data);
+  renderWeekMenu(data);
 }
 
 function showNotice({ title, body }) {
@@ -364,6 +404,7 @@ async function loadDashboard() {
   isLoading = true;
   const refreshButton = byId("refresh-button");
   refreshButton.disabled = true;
+  byId("dashboard").classList.add("is-refreshing");
 
   try {
     const query = new URLSearchParams({ actorUserId });
@@ -399,6 +440,7 @@ async function loadDashboard() {
   } finally {
     isLoading = false;
     refreshButton.disabled = false;
+    byId("dashboard").classList.remove("is-refreshing");
     byId("dashboard").hidden = !hasRendered;
     byId("refresh-area").hidden = !hasRendered;
   }
@@ -407,7 +449,7 @@ async function loadDashboard() {
 if (!catererId || !actorUserId) {
   showNotice({
     title: "Which caterer?",
-    body: "Open this page with your IDs in the address, for example /?catererId=<caterer id>&actorUserId=<owner user id>."
+    body: "Open this page with your IDs in the address, for example /?catererId=<caterer id>&actorUserId=<owner user id>. The README lists the fictional development caterers."
   });
 } else {
   byId("refresh-button").addEventListener("click", loadDashboard);
