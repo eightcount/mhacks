@@ -242,7 +242,9 @@ function isCalendarDate(value: string): boolean {
 export const getCatererDashboardSchema = z.object({
   catererId: uuid,
   actorUserId: uuid,
-  today: isoDate.refine(isCalendarDate, "Expected a real calendar date.").optional()
+  today: isoDate.refine(isCalendarDate, "Expected a real calendar date.").optional(),
+  /** YYYY-MM month for the dashboard figures; defaults to the month containing today. */
+  month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, "Expected a YYYY-MM month.").optional()
 });
 
 export type CreateUserInput = z.input<typeof createUserSchema>;

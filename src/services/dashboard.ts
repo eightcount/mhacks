@@ -16,10 +16,10 @@ import {
   type GetCatererDashboardInput
 } from "../validation/index.js";
 import { assertCatererOwner, getMenu } from "./caterers.js";
+import { summarizeMonthView, type CatererDashboardView } from "./dashboard-month.js";
 import {
   availabilityPeriod,
   summarizeCatererDashboard,
-  type CatererDashboard,
   type DashboardOrderRecord
 } from "./dashboard-summary.js";
 
@@ -69,7 +69,7 @@ async function loadOperations(catererId: string) {
  */
 export async function getCatererDashboard(
   input: GetCatererDashboardInput
-): Promise<CatererDashboard> {
+): Promise<CatererDashboardView> {
   const parsed = getCatererDashboardSchema.parse(input);
   const caterer = await assertCatererOwner(parsed.catererId, parsed.actorUserId);
   const today = parsed.today ?? localIsoDate(new Date());
@@ -117,7 +117,7 @@ export async function getCatererDashboard(
     items: itemsByOrderId.get(order.id) ?? []
   }));
 
-  return summarizeCatererDashboard({
+  const source = {
     caterer,
     ownerName: owner?.name ?? "",
     orders: records,
@@ -129,5 +129,10 @@ export async function getCatererDashboard(
       now: parsed.today ? new Date(`${parsed.today}T12:00:00.000Z`) : new Date()
     },
     today
-  });
+  };
+  const dashboard = summarizeCatererDashboard(source);
+  return {
+    ...dashboard,
+    monthView: summarizeMonthView(source, dashboard.preorders.preorders, parsed.month ?? today.slice(0, 7))
+  };
 }

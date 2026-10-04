@@ -84,6 +84,8 @@ export interface DashboardOrder {
   total: MoneyAmount;
   lines: DashboardOrderLine[];
   specialRequests: string | null;
+  /** UTC date the customer created the order. */
+  requestedOn: string;
 }
 
 /** NOT_SET means the date has no availability record, which search treats as unavailable. */
@@ -270,7 +272,8 @@ export function availabilityPeriod(today: string): DashboardPeriod {
   };
 }
 
-function datesIn(period: DashboardPeriod): string[] {
+/** Every YYYY-MM-DD date in an inclusive period. */
+export function datesIn(period: DashboardPeriod): string[] {
   const dates: string[] = [];
   for (
     let date = parseIsoDate(period.start);
@@ -282,7 +285,7 @@ function datesIn(period: DashboardPeriod): string[] {
   return dates;
 }
 
-function isWithin(date: string, period: DashboardPeriod): boolean {
+export function isWithin(date: string, period: DashboardPeriod): boolean {
   return date >= period.start && date <= period.end;
 }
 
@@ -300,14 +303,14 @@ function countDistinctCustomers(records: readonly DashboardOrderRecord[]): numbe
   return new Set(records.map(({ order }) => order.customerId)).size;
 }
 
-function byEventDate(left: DashboardOrderRecord, right: DashboardOrderRecord): number {
+export function byEventDate(left: DashboardOrderRecord, right: DashboardOrderRecord): number {
   return (
     left.order.eventDate.localeCompare(right.order.eventDate) ||
     left.order.createdAt.getTime() - right.order.createdAt.getTime()
   );
 }
 
-function toDashboardOrder({ order, customerName, items }: DashboardOrderRecord): DashboardOrder {
+export function toDashboardOrder({ order, customerName, items }: DashboardOrderRecord): DashboardOrder {
   const lines = items.map(({ item, menuItem }) => {
     const unitPriceCents = moneyToCents(item.unitPrice);
     return {
@@ -332,7 +335,8 @@ function toDashboardOrder({ order, customerName, items }: DashboardOrderRecord):
     subtotal: toMoneyAmount(lines.reduce((total, line) => total + line.lineTotal.cents, 0)),
     total: toMoneyAmount(moneyToCents(order.estimatedTotal)),
     lines,
-    specialRequests: order.specialRequests
+    specialRequests: order.specialRequests,
+    requestedOn: order.createdAt.toISOString().slice(0, 10)
   };
 }
 
@@ -481,7 +485,7 @@ function summarizeWeekMenu(
 }
 
 /** Shifts a YYYY-MM month by whole months. */
-function shiftMonth(yearMonth: string, months: number): string {
+export function shiftMonth(yearMonth: string, months: number): string {
   const date = parseIsoDate(`${yearMonth}-01`);
   return formatIsoDate(
     new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + months, 1))

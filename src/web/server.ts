@@ -36,11 +36,13 @@ async function serveDashboard(
   searchParams: URLSearchParams
 ): Promise<void> {
   const today = searchParams.get("today");
+  const month = searchParams.get("month");
   try {
     const dashboard = await getCatererDashboard({
       catererId,
       actorUserId: searchParams.get("actorUserId") ?? "",
-      ...(today ? { today } : {})
+      ...(today ? { today } : {}),
+      ...(month ? { month } : {})
     });
     sendJson(response, 200, dashboard);
   } catch (error) {

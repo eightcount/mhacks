@@ -88,6 +88,8 @@ export interface DashboardPreorder {
   status: OrderStatus;
   lines: DashboardPreorderLine[];
   total: MoneyAmount;
+  /** UTC date the customer submitted the preorder. */
+  requestedOn: string;
 }
 
 export interface DashboardProductionDay {
@@ -210,7 +212,8 @@ function toDashboardPreorder(order: PreorderRecord, formTitles: Map<string, stri
         lineTotal: toMoneyAmount(unitPriceCents * item.quantity)
       };
     }),
-    total: toMoneyAmount(moneyToCents(order.total))
+    total: toMoneyAmount(moneyToCents(order.total)),
+    requestedOn: order.createdAt.toISOString().slice(0, 10)
   };
 }
 
