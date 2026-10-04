@@ -12,11 +12,16 @@
     "db:migrate": "tsx src/db/migrate.ts",
     "db:seed": "tsx src/db/seed.ts",
     "db:verify": "tsx src/db/verify.ts",
-    "db:demo": "tsx src/db/demo.ts"
+    "db:demo": "tsx src/db/demo.ts",
+    "agent:backend": "tsx src/agent/internal-api.ts",
+    "agent:cli": "python3 -m fetch_agent.local_cli",
+    "agent:fetch": "python3 -m fetch_agent.fetch_agent",
+    "agent:configure": "node scripts/configure-agent-env.mjs",
+    "test:agent": "python3 -m unittest fetch_agent.test_conversation"
   },
   "dependencies": {
     "dotenv": "^16.6.1",
-    "drizzle-orm": "^0.44.5",
+    "drizzle-orm": "^0.45.3",
     "postgres": "^3.4.7",
     "zod": "^3.24.4"
   },
@@ -25,6 +30,6 @@
     "drizzle-kit": "^0.31.1",
     "tsx": "^4.19.4",
     "typescript": "^5.8.3",
-    "vitest": "^3.2.3"
+    "vitest": "^5.0.3"
   }
 }

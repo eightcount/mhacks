@@ -1,0 +1,20 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1791056000000,
+      "tag": "0000_initial_marketplace_schema",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1791056001000,
+      "tag": "0001_add_catering_request_states",
+      "breakpoints": true
+    }
+  ]
+}

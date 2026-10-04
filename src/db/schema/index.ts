@@ -244,3 +244,54 @@ export const messages = pgTable(
     index("messages_conversation_id_index").on(table.conversationId)
   ]
 );
+
+/**
+ * Structured, partial request state for the conversational agent. Keeping the
+ * fields explicit makes state queryable and avoids treating LLM history as a
+ * source of truth.
+ */
+export const cateringRequestStates = pgTable(
+  "catering_request_states",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "restrict" }),
+    customerId: uuid("customer_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    eventDate: date("event_date", { mode: "string" }),
+    budget: numeric("budget", { precision: 12, scale: 2 }),
+    dishes: text("dishes").array().default([]).notNull(),
+    cuisines: text("cuisines").array().default([]).notNull(),
+    headcount: integer("headcount"),
+    eventStyle: eventStyleEnum("event_style"),
+    dietaryRestrictions: text("dietary_restrictions").array().default([]).notNull(),
+    dietaryRestrictionsConfirmed: boolean("dietary_restrictions_confirmed")
+      .default(false)
+      .notNull(),
+    location: varchar("location", { length: 255 }),
+    fulfillmentMethod: fulfillmentMethodEnum("fulfillment_method"),
+    recentSearchResultIds: uuid("recent_search_result_ids").array().default([]).notNull(),
+    selectedCatererId: uuid("selected_caterer_id").references(() => caterers.id, {
+      onDelete: "restrict"
+    }),
+    pendingOrderId: uuid("pending_order_id").references(() => orders.id, {
+      onDelete: "restrict"
+    }),
+    ...timestamps
+  },
+  (table) => [
+    uniqueIndex("catering_request_states_conversation_id_unique").on(table.conversationId),
+    index("catering_request_states_customer_id_index").on(table.customerId),
+    index("catering_request_states_selected_caterer_id_index").on(table.selectedCatererId),
+    check(
+      "catering_request_states_budget_nonnegative",
+      sql`${table.budget} is null or ${table.budget} >= 0`
+    ),
+    check(
+      "catering_request_states_headcount_positive",
+      sql`${table.headcount} is null or ${table.headcount} > 0`
+    )
+  ]
+);

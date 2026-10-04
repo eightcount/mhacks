@@ -10,12 +10,14 @@ import {
   createAvailabilitySchema,
   createMenuItemSchema,
   getMenuFiltersSchema,
+  partialCateringSearchSchema,
   updateCatererSettingsSchema,
   updateMenuItemSchema,
   type CreateAvailabilityInput,
   type CateringRequestInput,
   type CreateMenuItemInput,
   type GetMenuFiltersInput,
+  type PartialCateringSearchInput,
   type UpdateCatererSettingsInput,
   type UpdateMenuItemInput
 } from "../validation/index.js";
@@ -25,15 +27,23 @@ import { exactLocationMatcher, type LocationMatcher } from "./location.js";
 import {
   assessAvailability,
   evaluateCatererMatch,
+  evaluatePartialCatererMatch,
   isFullCatererMatch,
+  isPartialCatererMatch,
   type AvailabilityAssessment,
   type CatererMatch
 } from "./matching.js";
+import type { PartialCatererMatch } from "./matching.js";
 import { centsToMoney, moneyToCents } from "./money.js";
 
 export interface SearchCatererResult {
   caterer: Caterer;
   match: CatererMatch;
+}
+
+export interface PartialSearchCatererResult {
+  caterer: Caterer;
+  match: PartialCatererMatch;
 }
 
 export interface SearchCaterersOptions {
@@ -50,6 +60,10 @@ async function getCatererOrThrow(catererId: string): Promise<Caterer> {
     throw new DomainError("CATERER_NOT_FOUND");
   }
   return caterer;
+}
+
+export function getCaterer(catererId: string): Promise<Caterer> {
+  return getCatererOrThrow(catererId);
 }
 
 async function assertCatererOwner(catererId: string, actorUserId: string): Promise<Caterer> {
@@ -93,6 +107,45 @@ export async function searchCaterers(
     );
 
     return isFullCatererMatch(request, match) ? [{ caterer, match }] : [];
+  });
+}
+
+/**
+ * Finds candidates using only explicitly known request fields. This is used by
+ * the conversational layer before optional preferences are collected; omitted
+ * preferences are reported as null rather than silently assumed.
+ */
+export async function searchCaterersPartial(
+  criteria: PartialCateringSearchInput,
+  options: SearchCaterersOptions = {}
+): Promise<PartialSearchCatererResult[]> {
+  const request = partialCateringSearchSchema.parse(criteria);
+  const activeCaterers = await db
+    .select()
+    .from(caterers)
+    .where(eq(caterers.active, true));
+  if (activeCaterers.length === 0) return [];
+
+  const catererIds = activeCaterers.map((caterer) => caterer.id);
+  const [activeMenuItems, availabilityEntries] = await Promise.all([
+    db
+      .select()
+      .from(menuItems)
+      .where(and(inArray(menuItems.catererId, catererIds), eq(menuItems.active, true))),
+    db.select().from(availability).where(eq(availability.date, request.eventDate))
+  ]);
+
+  return activeCaterers.flatMap((caterer) => {
+    const match = evaluatePartialCatererMatch(
+      request,
+      {
+        caterer,
+        menuItems: activeMenuItems.filter((item) => item.catererId === caterer.id),
+        availabilityEntry: availabilityEntries.find((entry) => entry.catererId === caterer.id)
+      },
+      options.locationMatcher ?? exactLocationMatcher
+    );
+    return isPartialCatererMatch(request, match) ? [{ caterer, match }] : [];
   });
 }
 

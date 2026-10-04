@@ -1,19 +1,33 @@
 import { z } from "zod";
+import { centsToMoney, moneyToCents } from "../services/money.js";
 import {
   dietaryTags,
   eventStyles,
   fulfillmentMethods,
+  messageSenders,
   orderStatuses,
   userRoles
 } from "../types/domain.js";
 
 const uuid = z.string().uuid();
+// Accept legacy numeric inputs, then keep validated money as exact decimal strings.
 const nonnegativeMoney = z
-  .coerce
-  .number()
-  .finite()
-  .nonnegative()
-  .refine((value) => Number.isInteger(value * 100), "Expected at most two decimal places.");
+  .union([z.string().trim(), z.number().finite()])
+  .transform((value) => String(value))
+  .pipe(
+    z.string().regex(
+      /^[0-9]+(?:\.[0-9]{1,2})?$/,
+      "Expected non-negative money with at most two decimal places."
+    )
+  )
+  .refine(
+    (value) => {
+      const [whole = ""] = value.split(".");
+      return whole.replace(/^0+/, "").length <= 10;
+    },
+    "Money exceeds the database numeric(12,2) limit."
+  )
+  .transform((value) => centsToMoney(moneyToCents(value)));
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected a YYYY-MM-DD date.");
 const nonEmptyText = z.string().trim().min(1);
 const dietaryRestrictions = z.array(z.enum(dietaryTags)).default([]);
@@ -101,6 +115,67 @@ export const cateringRequestSchema = z.object({
   fulfillmentMethod: z.enum(fulfillmentMethods)
 });
 
+/**
+ * A search can begin before every preference is known. Date, headcount,
+ * location, and food preference are the minimum deterministic constraints;
+ * omitted optional fields are not treated as defaults or filters.
+ */
+export const partialCateringSearchSchema = z
+  .object({
+    eventDate: isoDate,
+    dishes: requestedTerms,
+    cuisines: requestedTerms,
+    headcount: z.coerce.number().int().positive(),
+    location: nonEmptyText.max(255),
+    budget: nonnegativeMoney.optional(),
+    eventStyle: z.enum(eventStyles).optional(),
+    dietaryRestrictions: z.array(z.enum(dietaryTags)).optional(),
+    fulfillmentMethod: z.enum(fulfillmentMethods).optional()
+  })
+  .refine((value) => value.dishes.length > 0 || value.cuisines.length > 0, {
+    message: "Provide at least one requested cuisine or dish."
+  });
+
+export const requestStatePatchSchema = z
+  .object({
+    reset: z.boolean().optional(),
+    eventDate: isoDate.nullable().optional(),
+    budget: nonnegativeMoney.nullable().optional(),
+    dishes: z.array(nonEmptyText.max(255)).optional(),
+    cuisines: z.array(nonEmptyText.max(255)).optional(),
+    headcount: z.coerce.number().int().positive().nullable().optional(),
+    eventStyle: z.enum(eventStyles).nullable().optional(),
+    dietaryRestrictions: z.array(z.enum(dietaryTags)).optional(),
+    dietaryRestrictionsConfirmed: z.boolean().optional(),
+    location: nonEmptyText.max(255).nullable().optional(),
+    fulfillmentMethod: z.enum(fulfillmentMethods).nullable().optional(),
+    recentSearchResultIds: z.array(uuid).optional(),
+    selectedCatererId: uuid.nullable().optional(),
+    pendingOrderId: uuid.nullable().optional()
+  })
+  .refine((value) => Object.keys(value).length > 0, "Provide at least one state field.");
+
+export const createAgentSessionSchema = z.object({
+  externalConversationId: nonEmptyText.max(255),
+  customerId: uuid
+});
+
+export const appendAgentMessageSchema = z.object({
+  conversationId: uuid,
+  sender: z.enum(messageSenders),
+  content: nonEmptyText.max(10_000),
+  externalMessageId: nonEmptyText.max(255)
+});
+
+export const requestStateAddressSchema = z.object({
+  conversationId: uuid,
+  customerId: uuid
+});
+
+export const updateRequestStateRequestSchema = requestStateAddressSchema.extend({
+  patch: requestStatePatchSchema
+});
+
 export const createOrderSchema = cateringRequestSchema.extend({
   customerId: uuid,
   catererId: uuid,
@@ -155,6 +230,10 @@ export type CreateMenuItemInput = z.input<typeof createMenuItemSchema>;
 export type UpdateMenuItemInput = z.input<typeof updateMenuItemSchema>;
 export type CreateAvailabilityInput = z.input<typeof createAvailabilitySchema>;
 export type CateringRequestInput = z.input<typeof cateringRequestSchema>;
+export type PartialCateringSearchInput = z.input<typeof partialCateringSearchSchema>;
 export type CreateOrderInput = z.input<typeof createOrderSchema>;
 export type GetMenuFiltersInput = z.input<typeof getMenuFiltersSchema>;
 export type GetOrdersFiltersInput = z.input<typeof getOrdersFiltersSchema>;
+export type RequestStatePatchInput = z.input<typeof requestStatePatchSchema>;
+export type CreateAgentSessionInput = z.input<typeof createAgentSessionSchema>;
+export type AppendAgentMessageInput = z.input<typeof appendAgentMessageSchema>;

@@ -1,5 +1,6 @@
 import type {
   availability,
+  cateringRequestStates,
   caterers,
   menuItems,
   orderItems,
@@ -45,7 +46,7 @@ export type MessageSender = (typeof messageSenders)[number];
  */
 export interface CateringRequest {
   eventDate: string;
-  budget: number;
+  budget: string;
   dishes: string[];
   cuisines: string[];
   headcount: number;
@@ -61,3 +62,4 @@ export type MenuItem = typeof menuItems.$inferSelect;
 export type Availability = typeof availability.$inferSelect;
 export type Order = typeof orders.$inferSelect;
 export type OrderItem = typeof orderItems.$inferSelect;
+export type CateringRequestState = typeof cateringRequestStates.$inferSelect;

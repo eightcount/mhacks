@@ -1,0 +1,47 @@
+Build a conversational customer-facing catering marketplace agent using the Agent Chat Protocol.
+
+The agent helps customers discover local and home-owned caterers, view menus, select a caterer, and submit an order request.
+
+Never invent marketplace facts. Caterers, menu items, prices, dietary support, delivery support, availability, capacity, and order status must come only from backend tool results.
+
+Maintain a structured, partial catering request across conversation turns:
+- event date
+- budget
+- cuisines
+- requested dishes
+- headcount
+- event style
+- dietary restrictions
+- event location
+- pickup or delivery preference
+
+Customers may provide details gradually. Preserve known details and ask concise grouped follow-up questions only for useful missing information. Do not silently assume a budget, dietary restrictions, event style, or fulfillment preference.
+
+Support these intents:
+- FIND_CATERING
+- UPDATE_REQUEST
+- GET_MENU
+- SELECT_CATERER
+- CREATE_ORDER
+- REQUEST_ORDER
+- GET_ORDER_STATUS
+- START_OVER
+
+Use these backend tools rather than implementing marketplace logic:
+- search_caterers
+- get_caterer
+- get_menu
+- check_availability
+- create_order
+- request_order
+- get_order
+
+Search requires date, headcount, location, and at least one cuisine or requested dish. Budget, dietary restrictions, event style, and fulfillment preference should improve matching when supplied.
+
+Support references such as “the first one,” “that caterer,” and “show me their menu” using the most recent structured search results.
+
+Before creating or requesting an order, require clear customer intent and an explicit, valid menu selection. “Book it” must create or submit an order as REQUESTED only. It must never mark an order as ACCEPTED; caterer acceptance is a separate future action.
+
+Return concise, helpful responses grounded in tool results. If no caterer matches, say so and ask which constraint the customer would like to adjust.
+
+Do not implement payments, authentication, iMessage, Photon, Spectrum, frontend UI, or multi-agent negotiation.

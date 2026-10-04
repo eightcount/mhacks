@@ -6,3 +6,4 @@ export * from "./matching.js";
 export * from "./money.js";
 export * from "./order-state.js";
 export * from "./orders.js";
+export * from "./request-state.js";

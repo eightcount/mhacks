@@ -76,7 +76,7 @@ const candidate: CatererSearchCandidate = { caterer, menuItems, availabilityEntr
 
 const baseRequest: CateringRequest = {
   eventDate: "2030-06-15",
-  budget: 450,
+  budget: "450.00",
   cuisines: ["chinese"],
   dishes: ["DUMPLINGS"],
   headcount: 30,
@@ -111,7 +111,7 @@ describe("deterministic caterer matching", () => {
   });
 
   it("filters a budget that cannot plausibly meet the request", () => {
-    expect(matches({ ...baseRequest, budget: 300 })).toBe(false);
+    expect(matches({ ...baseRequest, budget: "300.00" })).toBe(false);
   });
 
   it("filters incompatible cuisine and unavailable requested dishes", () => {

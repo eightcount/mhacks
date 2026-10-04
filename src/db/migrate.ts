@@ -1,12 +1,24 @@
+import "dotenv/config";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
-import { closeDatabaseConnection, db } from "./index.js";
+import { createDatabaseConnection } from "./index.js";
 
 async function runMigrations(): Promise<void> {
+  const migrationDatabaseUrl =
+    process.env.DATABASE_URL_UNPOOLED ?? process.env.DATABASE_URL;
+
+  if (!migrationDatabaseUrl) {
+    throw new Error(
+      "DATABASE_URL_UNPOOLED or DATABASE_URL must be set before running migrations."
+    );
+  }
+
+  const connection = createDatabaseConnection(migrationDatabaseUrl);
+
   try {
-    await migrate(db, { migrationsFolder: "drizzle" });
+    await migrate(connection.db, { migrationsFolder: "drizzle" });
     console.info("Database migrations completed.");
   } finally {
-    await closeDatabaseConnection();
+    await connection.close();
   }
 }
 

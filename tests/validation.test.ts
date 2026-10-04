@@ -64,6 +64,25 @@ describe("foundational validation", () => {
     expect(createOrderSchema.safeParse({ ...validOrder, budget: -1 }).success).toBe(false);
   });
 
+  it.each(["0.29", "1.15", "500.10", "9999999999.99"])(
+    "preserves the exact budget %s through validation",
+    (budget) => {
+      expect(createOrderSchema.parse({ ...validOrder, budget }).budget).toBe(budget);
+    }
+  );
+
+  it("normalizes legacy numeric money inputs without rounding", () => {
+    expect(createOrderSchema.parse(validOrder).budget).toBe("300.00");
+    expect(createMenuItemSchema.parse({ ...validMenuItem, price: 0.29 }).price).toBe("0.29");
+  });
+
+  it.each(["0.291", "-0.01", "10000000000.00", "", true, null, Infinity, NaN])(
+    "rejects invalid money input %s",
+    (budget) => {
+      expect(createOrderSchema.safeParse({ ...validOrder, budget }).success).toBe(false);
+    }
+  );
+
   it("requires the essential caterer fields", () => {
     expect(createCatererSchema.safeParse({ ...validCaterer, businessName: "" }).success).toBe(false);
     expect(createCatererSchema.safeParse({ ...validCaterer, maximumCapacity: 0 }).success).toBe(false);
