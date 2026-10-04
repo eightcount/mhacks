@@ -1,239 +1,20 @@
 from __future__ import annotations
 
-import json
 import logging
 import os
-import re
-from dataclasses import dataclass, field
-from datetime import date, timedelta
-from enum import Enum
-from typing import Any, Protocol
+from dataclasses import dataclass, replace
+from typing import Any
 from uuid import uuid4
 
 from .backend import AgentBackendClient, BackendDomainError
-from .models import PartialCateringRequest, normalize_budget
+from .models import PartialCateringRequest
+from .menu_selection import MenuSelection, normalized_menu_name
+from .extraction import (
+    AsiOneExtractor, ConversationContext, Extraction, Intent,
+    RequestExtractor, RequestUpdate, RuleBasedExtractor,
+)
 
 LOGGER = logging.getLogger(__name__)
-
-
-class Intent(str, Enum):
-    FIND_CATERING = "FIND_CATERING"
-    GET_MENU = "GET_MENU"
-    SELECT_CATERER = "SELECT_CATERER"
-    CREATE_ORDER = "CREATE_ORDER"
-    REQUEST_ORDER = "REQUEST_ORDER"
-    GET_ORDER_STATUS = "GET_ORDER_STATUS"
-    UPDATE_REQUEST = "UPDATE_REQUEST"
-    START_OVER = "START_OVER"
-
-
-@dataclass
-class Extraction:
-    intent: Intent = Intent.UPDATE_REQUEST
-    patch: dict[str, Any] = field(default_factory=dict)
-    reference_index: int | None = None
-
-
-class RequestExtractor(Protocol):
-    async def extract(self, message: str, state: PartialCateringRequest) -> Extraction: ...
-
-
-class RuleBasedExtractor:
-    """Small credential-free fallback for local development and deterministic tests."""
-
-    cuisines = {
-        "chinese": "Chinese",
-        "mexican": "Mexican",
-        "vegan": "Vegan",
-        "mediterranean": "Mediterranean",
-        "korean": "Korean",
-    }
-    dishes = ("dumplings", "fried rice", "tacos", "shawarma", "bibimbap", "noodles")
-
-    async def extract(self, message: str, state: PartialCateringRequest) -> Extraction:
-        text = message.strip()
-        lower = text.lower()
-        extraction = Extraction(intent=self._intent(lower))
-
-        if "first" in lower:
-            extraction.reference_index = 0
-        elif "second" in lower:
-            extraction.reference_index = 1
-        if extraction.reference_index is not None and extraction.intent == Intent.UPDATE_REQUEST:
-            extraction.intent = Intent.GET_MENU
-
-        patch: dict[str, Any] = {}
-        parsed_date = self._parse_date(lower)
-        if parsed_date:
-            patch["eventDate"] = parsed_date
-        budget = re.search(r"\$\s*(\d+(?:\.\d{1,2})?)(?!\d|\.\d)", lower)
-        if budget:
-            patch["budget"] = normalize_budget(budget.group(1))
-        headcount = re.search(r"\b(\d+)\s*(?:people|guests|attendees|persons)\b", lower)
-        if headcount:
-            patch["headcount"] = int(headcount.group(1))
-
-        matched_cuisines = [value for key, value in self.cuisines.items() if key in lower]
-        if matched_cuisines:
-            patch["cuisines"] = matched_cuisines
-        matched_dishes = [dish for dish in self.dishes if dish in lower]
-        if matched_dishes:
-            patch["dishes"] = matched_dishes
-
-        styles = {
-            "family style": "FAMILY_STYLE",
-            "individual meals": "INDIVIDUAL_MEALS",
-            "drop off": "DROP_OFF",
-            "buffet": "BUFFET",
-            "formal": "FORMAL",
-            "casual": "CASUAL",
-        }
-        for phrase, value in styles.items():
-            if phrase in lower:
-                patch["eventStyle"] = value
-                break
-
-        dietary = {
-            "gluten free": "GLUTEN_FREE",
-            "vegetarian": "VEGETARIAN",
-            "vegan": "VEGAN",
-            "halal": "HALAL",
-        }
-        matched_dietary = [value for phrase, value in dietary.items() if phrase in lower]
-        if matched_dietary:
-            patch["dietaryRestrictions"] = matched_dietary
-            patch["dietaryRestrictionsConfirmed"] = True
-        elif any(
-            phrase in lower
-            for phrase in ("no dietary restrictions", "no dietary restriction", "no restrictions")
-        ):
-            patch["dietaryRestrictions"] = []
-            patch["dietaryRestrictionsConfirmed"] = True
-        if "delivery" in lower:
-            patch["fulfillmentMethod"] = "DELIVERY"
-        elif "pickup" in lower or "pick up" in lower:
-            patch["fulfillmentMethod"] = "PICKUP"
-
-        if "ann arbor" in lower or "umich" in lower or "u-m" in lower:
-            patch["location"] = "Ann Arbor, MI"
-        elif "ypsilanti" in lower:
-            patch["location"] = "Ypsilanti, MI"
-        elif "detroit" in lower:
-            patch["location"] = "Detroit, MI"
-
-        if extraction.intent == Intent.START_OVER:
-            patch = {"reset": True}
-        extraction.patch = patch
-        return extraction
-
-    @staticmethod
-    def _intent(text: str) -> Intent:
-        if any(phrase in text for phrase in ("start over", "start again", "reset")):
-            return Intent.START_OVER
-        if "menu" in text:
-            return Intent.GET_MENU
-        if any(phrase in text for phrase in ("create a draft", "create draft", "draft order")):
-            return Intent.CREATE_ORDER
-        if any(phrase in text for phrase in ("book it", "request order", "place the order")):
-            return Intent.REQUEST_ORDER
-        if any(phrase in text for phrase in ("order status", "where is my order", "status")):
-            return Intent.GET_ORDER_STATUS
-        if any(phrase in text for phrase in ("let's use", "lets use", "i want that", "select", "go with")):
-            return Intent.SELECT_CATERER
-        if any(phrase in text for phrase in ("need", "find", "catering", "caterer", "looking for")):
-            return Intent.FIND_CATERING
-        return Intent.UPDATE_REQUEST
-
-    @staticmethod
-    def _parse_date(text: str) -> str | None:
-        iso = re.search(r"\b(20\d{2}-\d{2}-\d{2})\b", text)
-        if iso:
-            return iso.group(1)
-        weekdays = {
-            "monday": 0,
-            "tuesday": 1,
-            "wednesday": 2,
-            "thursday": 3,
-            "friday": 4,
-            "saturday": 5,
-            "sunday": 6,
-        }
-        for weekday, number in weekdays.items():
-            if weekday in text:
-                today = date.today()
-                delta = (number - today.weekday()) % 7
-                if "next" in text or delta == 0:
-                    delta += 7
-                return (today + timedelta(days=delta)).isoformat()
-        return None
-
-
-class AsiOneExtractor:
-    """Optional ASI:One extraction adapter using its OpenAI-compatible API."""
-
-    def __init__(self, api_key: str):
-        self.api_key = api_key
-        self.fallback = RuleBasedExtractor()
-
-    async def extract(self, message: str, state: PartialCateringRequest) -> Extraction:
-        try:
-            from openai import AsyncOpenAI
-        except ImportError as error:
-            raise RuntimeError("Install requirements.txt to use ASI:One extraction.") from error
-
-        client = AsyncOpenAI(
-            api_key=self.api_key,
-            base_url=os.environ.get("ASI1_BASE_URL") or "https://api.asi1.ai/v1",
-        )
-        system = (
-            "Extract catering-request updates only. Return JSON with intent, patch, and "
-            "reference_index. Allowed intents: FIND_CATERING, GET_MENU, SELECT_CATERER, "
-            "CREATE_ORDER, REQUEST_ORDER, GET_ORDER_STATUS, UPDATE_REQUEST, START_OVER. "
-            "Use only explicit user facts. Return budget as a decimal dollar string (e.g. \"500.10\"). "
-            "patch keys are eventDate (YYYY-MM-DD), budget, dishes, "
-            "cuisines, headcount, eventStyle, dietaryRestrictions, location, fulfillmentMethod, "
-            "dietaryRestrictionsConfirmed, or reset. Set dietaryRestrictionsConfirmed only when "
-            "the customer states a dietary requirement or explicitly says there are none. Use null "
-            "for reference_index when no first/second reference exists. Never invent a missing value."
-        )
-        try:
-            response = await client.chat.completions.create(
-                model=os.environ.get("ASI1_MODEL") or "asi1",
-                temperature=0,
-                messages=[
-                    {"role": "system", "content": system},
-                    {
-                        "role": "user",
-                        "content": json.dumps(
-                            {"message": message, "knownRequest": state.__dict__}
-                        ),
-                    },
-                ],
-            )
-            content = response.choices[0].message.content
-            if not content:
-                return await self.fallback.extract(message, state)
-            # Preserve decimal literals exactly even if the model returns a JSON number.
-            return self._validated_extraction(json.loads(content, parse_float=str))
-        # The hosted model is optional. A malformed response or a transient network
-        # failure must not prevent local, deterministic development from working.
-        except Exception:  # noqa: BLE001 - this is a deliberate external-service boundary
-            return await self.fallback.extract(message, state)
-
-    @staticmethod
-    def _validated_extraction(value: object) -> Extraction:
-        if not isinstance(value, dict):
-            raise ValueError("Structured extraction must be an object.")
-        intent = Intent(str(value.get("intent", "UPDATE_REQUEST")))
-        patch = value.get("patch", {})
-        if not isinstance(patch, dict):
-            raise ValueError("Extraction patch must be an object.")
-        if "budget" in patch and patch["budget"] is not None:
-            patch["budget"] = normalize_budget(patch["budget"])
-        reference = value.get("reference_index")
-        if reference is not None and (not isinstance(reference, int) or reference < 0):
-            raise ValueError("reference_index must be a non-negative integer or null.")
-        return Extraction(intent=intent, patch=patch, reference_index=reference)
 
 
 @dataclass
@@ -256,51 +37,161 @@ class CateringConversationEngine:
     async def handle_message(
         self, external_conversation_id: str, customer_id: str, message: str
     ) -> AgentReply:
-        raw_state = await self.backend.create_session(external_conversation_id, customer_id)
-        state = PartialCateringRequest.from_api(raw_state)
-        await self.backend.append_message(
-            state.conversation_id, "CUSTOMER", message, f"agent-in:{uuid4()}"
+        root = PartialCateringRequest.from_api(
+            await self.backend.create_session(external_conversation_id, customer_id)
         )
-        extraction = await self.extractor.extract(message, state)
-        LOGGER.info(
-            "agent_event=received_intent session=%s intent=%s",
-            state.conversation_id,
-            extraction.intent,
-        )
-
-        if extraction.patch:
-            request_fields = {
-                "eventDate",
-                "budget",
-                "dishes",
-                "cuisines",
-                "headcount",
-                "eventStyle",
-                "dietaryRestrictions",
-                "location",
-                "fulfillmentMethod",
-            }
-            if state.pending_order_id and request_fields.intersection(extraction.patch):
-                extraction.patch["pendingOrderId"] = None
-            raw_state = await self.backend.update_state(
-                state.conversation_id, state.customer_id, extraction.patch
-            )
-            state = PartialCateringRequest.from_api(raw_state)
-
+        state = root
         try:
-            reply = await self._respond(extraction, state)
-        except BackendDomainError as error:
-            reply = AgentReply(
-                text=self._domain_error_text(error.code), state=state, tools=[]
+            raw_context = await self.backend.get_context(root.conversation_id, customer_id)
+            context = ConversationContext(
+                [PartialCateringRequest.from_api(row) for row in raw_context["requests"]],
+                raw_context.get("history", []),
             )
-
-        await self.backend.append_message(
-            reply.state.conversation_id,
-            "SYSTEM",
-            reply.text,
-            f"agent-out:{uuid4()}",
-        )
+            state = next(request for request in context.requests
+                         if request.conversation_id == raw_context["activeConversationId"])
+            await self.backend.append_message(root.conversation_id, "CUSTOMER", message, f"agent-in:{uuid4()}")
+            extraction = await self.extractor.extract(message, state, context)
+            LOGGER.info("agent_event=received_intent intent=%s", extraction.intent.value)
+            if extraction.intent in (Intent.GET_ORDERS, Intent.GET_ORDER_STATUS):
+                reply = await self._get_orders(state, extraction.order_filters)
+            elif extraction.intent == Intent.GET_REQUESTS:
+                reply = AgentReply(self._requests_summary(context.requests), state, [])
+            elif extraction.intent in (Intent.HELP, Intent.CLARIFY):
+                text = ("I can find caterers, plan separate events, show menus, submit your chosen "
+                        "orders, and tell you what you ordered. "
+                        "Describe each event's location, date, guest count, and food preferences.")
+                if len(context.requests) > 1:
+                    text += "\n" + self._requests_summary(context.requests) + "\nWhich request should we work on?"
+                reply = AgentReply(text, state, [])
+            else:
+                reply = await self._handle_requests(root, state, context, extraction)
+        except BackendDomainError as error:
+            reply = AgentReply(self._domain_error_text(error.code), state, [])
+        await self.backend.append_message(root.conversation_id, "SYSTEM", reply.text[:10_000], f"agent-out:{uuid4()}")
         return reply
+
+    async def _handle_requests(self, root: PartialCateringRequest, active: PartialCateringRequest,
+                               context: ConversationContext, extraction: Extraction) -> AgentReply:
+        updates = extraction.request_updates or [RequestUpdate(
+            extraction.patch, extraction.request_index, extraction.new_request,
+        )]
+        # Resolve every event reference before changing requests or submitting orders.
+        if any((u.request_index is not None and not 0 <= u.request_index < len(context.requests))
+               or (u.new_request and u.request_index is not None)
+               or (len(updates) > 1 and u.request_index is None and not u.new_request)
+               for u in updates):
+            return AgentReply("Please identify the event by request number or location; I couldn't resolve that reference.", active, [])
+        reuse_root = int(len(context.requests) == 1 and self._is_empty(context.requests[0]) and updates[0].new_request)
+        if len(context.requests) + sum(u.new_request for u in updates) - reuse_root > 20:
+            return AgentReply("Please finish an existing catering request before adding more events.", active, [])
+        replies: list[AgentReply] = []
+        for update_index, update in enumerate(updates):
+            if update.new_request:
+                if update_index == 0 and reuse_root:
+                    state = context.requests[0]
+                else:
+                    state = PartialCateringRequest.from_api(
+                        await self.backend.create_request(root.conversation_id, root.customer_id)
+                    )
+                    context.requests.append(state)
+            elif update.request_index is not None:
+                state = context.requests[update.request_index]
+            else:
+                state = active
+            reply = await self._process_request(root, state, extraction, update)
+            index = next(i for i, request in enumerate(context.requests)
+                         if request.conversation_id == state.conversation_id)
+            context.requests[index] = reply.state
+            if len(context.requests) > 1 or len(updates) > 1:
+                reply.text = f"Request {index + 1} — {reply.state.location or 'location not specified'}:\n{reply.text}"
+            replies.append(reply)
+        return AgentReply("\n\n".join(reply.text for reply in replies), replies[-1].state,
+                          [tool for reply in replies for tool in reply.tools])
+
+    async def _process_request(self, root: PartialCateringRequest, state: PartialCateringRequest,
+                               extraction: Extraction, update: RequestUpdate) -> AgentReply:
+        try:
+            state = PartialCateringRequest.from_api(await self.backend.activate_request(
+                root.conversation_id, root.customer_id, state.conversation_id,
+            ))
+            patch = dict(update.patch)
+            if extraction.intent == Intent.START_OVER:
+                patch["reset"] = True
+            fields = {
+                "eventDate": state.event_date, "budget": state.budget, "dishes": state.dishes,
+                "cuisines": state.cuisines, "headcount": state.headcount, "eventStyle": state.event_style,
+                "dietaryRestrictions": state.dietary_restrictions, "location": state.location,
+                "fulfillmentMethod": state.fulfillment_method,
+            }
+            changed = {key for key, value in patch.items() if key in fields and value != fields[key]}
+            if changed:
+                patch["pendingOrderId"] = None
+            # Choosing a dish from the displayed menu keeps that caterer selected.
+            if changed - {"dishes"}:
+                patch.update(selectedCatererId=None, recentSearchResultIds=[])
+            if patch:
+                state = PartialCateringRequest.from_api(await self.backend.update_state(
+                    state.conversation_id, state.customer_id, patch,
+                ))
+            step = replace(extraction, patch=patch, request_updates=[])
+            if extraction.caterer_name:
+                step.reference_index = await self._named_caterer_reference(state, extraction.caterer_name)
+                if step.reference_index is None:
+                    return AgentReply("I couldn't identify that name in this event's search results. Choose an option number.", state, ["get_caterer"])
+            if step.intent == Intent.REQUEST_ORDER and not state.selected_caterer_id and update.new_request:
+                step.intent = Intent.FIND_CATERING
+            return await self._respond(step, state)
+        except BackendDomainError as error:
+            return AgentReply(self._domain_error_text(error.code), state, [])
+
+    @staticmethod
+    def _is_empty(state: PartialCateringRequest) -> bool:
+        return not any((state.event_date, state.budget, state.cuisines, state.dishes, state.headcount,
+                        state.location, state.event_style, state.fulfillment_method,
+                        state.dietary_restrictions_confirmed, state.pending_order_id))
+
+    @staticmethod
+    def _requests_summary(requests: list[PartialCateringRequest]) -> str:
+        lines = []
+        for index, state in enumerate(requests):
+            details = [state.location or "location needed", state.event_date or "date needed",
+                       f"{state.headcount} guests" if state.headcount else "guest count needed",
+                       ", ".join(state.dishes or state.cuisines) or "food preferences needed"]
+            if state.budget is not None:
+                details.append(f"budget ${state.budget}")
+            if state.pending_order_id:
+                details.append("order created; ask for its current status")
+            lines.append(f"{index + 1}. " + " · ".join(details))
+        return "Your catering plans:\n" + "\n".join(lines)
+
+    async def _named_caterer_reference(self, state: PartialCateringRequest, name: str) -> int | None:
+        matches = []
+        for index, caterer_id in enumerate(state.recent_search_result_ids):
+            result = await self.backend.tool("get_caterer", {"catererId": caterer_id})
+            if result["caterer"]["businessName"].casefold() == name.strip().casefold():
+                matches.append(index)
+        return matches[0] if len(matches) == 1 else None
+
+    async def _get_orders(self, state: PartialCateringRequest, filters: dict[str, str]) -> AgentReply:
+        result = await self.backend.tool("get_orders", {**filters, "customerId": state.customer_id})
+        if not result["orders"]:
+            return AgentReply("You have no saved orders matching that request. Your catering plans aren't orders until you submit them.", state, ["get_orders"])
+        status_labels = {
+            "DRAFT": "draft — not submitted", "REQUESTED": "requested — awaiting caterer acceptance",
+            "ACCEPTED": "accepted", "DECLINED": "declined", "CANCELLED": "cancelled", "COMPLETED": "completed",
+        }
+        lines = []
+        for entry in result["orders"]:
+            order = entry["order"]
+            items = ", ".join(f"{item['quantity']} × {item['name']} (${item['unitPrice']} each)" for item in entry["items"])
+            lines.append(f"- {entry['catererName']} on {order['eventDate']} at {order['eventLocation']}: "
+                         f"{items or 'no items recorded'}; {order['guestCount']} guests; "
+                         f"{order['fulfillmentMethod'].lower()}; total ${order['estimatedTotal']}; "
+                         f"{status_labels[order['status']]}.")
+        text = "Your saved orders:\n" + "\n".join(lines)
+        if result.get("hasMore"):
+            text += "\nShowing the latest 50 orders. Give me a date, location, or status to narrow them down."
+        return AgentReply(text, state, ["get_orders"])
 
     async def _respond(self, extraction: Extraction, state: PartialCateringRequest) -> AgentReply:
         if extraction.intent == Intent.START_OVER:
@@ -313,12 +204,13 @@ class CateringConversationEngine:
             return await self._get_menu(state, extraction.reference_index)
         if extraction.intent == Intent.SELECT_CATERER:
             return await self._select_caterer(state, extraction.reference_index)
+        if extraction.intent == Intent.SELECT_MENU_ITEMS:
+            return await self._create_order(state, request_after_creation=False,
+                                            selections=extraction.menu_items)
         if extraction.intent == Intent.CREATE_ORDER:
             return await self._create_order(state, request_after_creation=False)
         if extraction.intent == Intent.REQUEST_ORDER:
             return await self._request_order(state)
-        if extraction.intent == Intent.GET_ORDER_STATUS:
-            return await self._get_order_status(state)
 
         search_input = state.search_input()
         if search_input is None:
@@ -387,7 +279,7 @@ class CateringConversationEngine:
             return AgentReply("Choose a caterer from the latest search results before requesting a menu.", state, [])
         if caterer_id != state.selected_caterer_id:
             raw_state = await self.backend.update_state(
-                state.conversation_id, state.customer_id, {"selectedCatererId": caterer_id}
+                state.conversation_id, state.customer_id, {"selectedCatererId": caterer_id, "pendingOrderId": None}
             )
             state = PartialCateringRequest.from_api(raw_state)
         filters: dict[str, Any] = {}
@@ -403,12 +295,14 @@ class CateringConversationEngine:
             )
             for item in items
         ]
-        return AgentReply("Active menu items:\n" + "\n".join(lines), state, ["get_menu"])
+        return AgentReply("Active menu items:\n" + "\n".join(lines)
+                          + "\nTell me the item names and quantities, such as '20 Vegetable Dumplings'. Quantities use the menu's listed units.",
+                          state, ["get_menu"])
 
     async def _request_order(self, state: PartialCateringRequest) -> AgentReply:
         if state.pending_order_id:
             result = await self.backend.tool(
-                "get_order", {"orderId": state.pending_order_id}
+                "get_order", {"orderId": state.pending_order_id, "customerId": state.customer_id}
             )
             order = result["order"]["order"]
             if order["status"] == "DRAFT":
@@ -434,39 +328,71 @@ class CateringConversationEngine:
         return await self._create_order(state, request_after_creation=True)
 
     async def _create_order(
-        self, state: PartialCateringRequest, request_after_creation: bool
+        self, state: PartialCateringRequest, request_after_creation: bool,
+        selections: list[MenuSelection] | None = None,
     ) -> AgentReply:
         if not state.selected_caterer_id:
             return AgentReply("Choose a caterer before creating an order.", state, [])
+        if state.pending_order_id:
+            result = await self.backend.tool("get_order", {
+                "orderId": state.pending_order_id, "customerId": state.customer_id,
+            })
+            status = result["order"]["order"]["status"]
+            return AgentReply(
+                f"This event already has an order with status {status}. "
+                "To keep it, say 'book it' if it is a draft. To choose a replacement, start over with a new request.",
+                state, ["get_order"],
+            )
+        if not selections:
+            return AgentReply(
+                "Please tell me the menu item names and quantities before I create the order, "
+                "for example '20 Vegetable Dumplings'.", state, [],
+            )
+        if any(type(item.quantity) is not int or not 0 < item.quantity <= 2_147_483_647 for item in selections):
+            return AgentReply("Please use a positive whole-number quantity for each menu item.", state, [])
         order_input = state.order_input()
         if order_input is None:
-            return AgentReply(self._order_follow_up(state), state, [])
-        if len(state.dishes) != 1:
             return AgentReply(
-                "Before I create an order, choose one menu item and quantity. I won't assume a menu selection.",
-                state,
-                [],
+                self._order_follow_up(state) + " Then send the item names and quantities again to save the draft.",
+                state, [],
             )
         menu = await self.backend.tool(
-            "get_menu",
-            {
-                "catererId": state.selected_caterer_id,
-                "filters": {"requestedDishes": state.dishes},
-            },
+            "get_menu", {"catererId": state.selected_caterer_id},
         )
         items = menu["menuItems"]
-        if len(items) != 1:
-            return AgentReply(
-                "Please choose a specific menu item and quantity before I create the order.", state, ["get_menu"]
-            )
+        chosen: list[dict[str, Any]] = []
+        descriptions: list[str] = []
+        for selection in selections:
+            name = normalized_menu_name(selection.name)
+            exact = [item for item in items if normalized_menu_name(item["name"]) == name]
+            matches = exact or [item for item in items
+                                if name and f" {name} " in f" {normalized_menu_name(item['name'])} "]
+            if len(matches) != 1:
+                reason = "matches several items" if matches else "isn't on this caterer's active menu"
+                return AgentReply(
+                    f"'{selection.name}' {reason}. Please use the exact menu item name and quantity. "
+                    "I haven't created an order.", state, ["get_menu"],
+                )
+            item = matches[0]
+            if any(line["menuItemId"] == item["id"] for line in chosen):
+                return AgentReply("Please list each menu item once with its total quantity.", state, ["get_menu"])
+            chosen.append({"menuItemId": item["id"], "quantity": selection.quantity})
+            descriptions.append(f"{selection.quantity} × {item['name']}")
         order_input = {
             "customerId": state.customer_id,
             "catererId": state.selected_caterer_id,
             **order_input,
-            "menuItems": [{"menuItemId": items[0]["id"], "quantity": state.headcount}],
+            "menuItems": chosen,
         }
         created = (await self.backend.tool("create_order", order_input))["order"]
         order = created["order"]
+        updated_state = PartialCateringRequest.from_api(
+            await self.backend.update_state(
+                state.conversation_id,
+                state.customer_id,
+                {"pendingOrderId": order["id"]},
+            )
+        )
         tools = ["get_menu", "create_order"]
         if request_after_creation:
             order = (
@@ -476,16 +402,10 @@ class CateringConversationEngine:
                 )
             )["order"]
             tools.append("request_order")
-        updated_state = PartialCateringRequest.from_api(
-            await self.backend.update_state(
-                state.conversation_id,
-                state.customer_id,
-                {"pendingOrderId": order["id"]},
-            )
-        )
         if not request_after_creation:
             return AgentReply(
-                f"I created a draft order. Estimated total: ${order['estimatedTotal']}. Say 'book it' to submit it.",
+                f"I created a draft order: {', '.join(descriptions)}. "
+                f"Estimated total: ${order['estimatedTotal']}. Say 'book it' to submit it.",
                 updated_state,
                 tools,
             )
@@ -494,13 +414,6 @@ class CateringConversationEngine:
             updated_state,
             tools,
         )
-
-    async def _get_order_status(self, state: PartialCateringRequest) -> AgentReply:
-        if not state.pending_order_id:
-            return AgentReply("There is no order request in this conversation yet.", state, [])
-        result = await self.backend.tool("get_order", {"orderId": state.pending_order_id})
-        order = result["order"]["order"]
-        return AgentReply(f"Order status: {order['status']}.", state, ["get_order"])
 
     @staticmethod
     def _resolve_caterer_reference(
@@ -537,6 +450,9 @@ class CateringConversationEngine:
             "INVALID_ORDER_TRANSITION": "That order cannot be changed to the requested status.",
             "CATERER_NOT_FOUND": "I couldn't find that caterer.",
             "ORDER_NOT_FOUND": "I couldn't find that order.",
+            "INVALID_INPUT": "I couldn't use one of those details. Please check the date, guest count, budget, and preferences.",
+            "UNAUTHORIZED_CUSTOMER": "I can only show or change orders belonging to this customer.",
+            "REQUEST_LIMIT_REACHED": "Please finish an existing catering request before adding more events.",
             "BACKEND_UNAVAILABLE": "The marketplace is temporarily unavailable. Please try again shortly.",
         }
         return messages.get(code, "I couldn't complete that marketplace action. Please try again.")

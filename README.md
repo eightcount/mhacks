@@ -2,7 +2,11 @@
 
 This project is an agentic catering marketplace connecting customers with local, small, and home-owned caterers through conversational interfaces. The backend stores marketplace data in Neon PostgreSQL and keeps business rules deterministic.
 
-Phase 3 adds one customer-facing Fetch.ai conversational agent. It collects a partial catering request over multiple messages, persists that state, invokes the existing marketplace tools, and turns grounded tool data into concise replies. It does not implement Photon, Spectrum, iMessage, authentication, payments, or a multi-agent system. The only UI is a local, read-only [caterer dashboard](#caterer-dashboard).
+Phase 3 includes a customer-facing Fetch.ai conversational agent. It collects a partial catering request over multiple messages, persists that state, invokes the existing marketplace tools, and turns grounded tool data into concise replies.
+
+A separate [caterer operations workflow](docs/caterer-workflow.md) adds guided product/recipe setup, shareable order forms, weekly production and ingredient totals, distribution labels, grocery-provider adapters, and customer notification drafts. Start with `npm run caterer:configure`, then `npm run caterer:backend` and `npm run caterer:cli` after applying the caterer migration to your intended database. The [caterer Photon/iMessage adapter](docs/photon-imessage.md) is implemented; configure your Photon project and owner address, then run `npm run photon:start`. Live activation requires those local credentials. Multi-tenant login and automatic grocery checkout are not implemented.
+
+A local, read-only [caterer dashboard](#caterer-dashboard) is also available.
 
 ## Architecture
 
@@ -18,13 +22,13 @@ Deterministic TypeScript services
 Neon PostgreSQL
 ```
 
-The long-term messaging path remains planned:
+The caterer iMessage adapter follows this path:
 
 ```text
 iMessage → Photon / Spectrum → Backend → Fetch.ai → Marketplace Tools → Neon PostgreSQL
 ```
 
-Photon is messaging infrastructure; Fetch.ai is agent orchestration; Neon/PostgreSQL is persistent marketplace data. Photon/iMessage is **not implemented** in this phase.
+Photon is messaging infrastructure; Fetch.ai is agent orchestration; Neon/PostgreSQL is persistent marketplace data. The customer agent's iMessage routing remains unconnected.
 
 ## Why standard uAgent Chat Protocol
 
@@ -127,7 +131,12 @@ source .venv/bin/activate
 npm run agent:cli
 ```
 
-Try this seeded-data flow (include a dish so the agent has an explicit order item):
+Both `agent:cli` and `agent:fetch` load the project's `.env` and pass the values
+to Python. Activate `.venv` first so they use its Python interpreter. To keep a
+separate verification conversation, run
+`FETCH_AGENT_LOCAL_SESSION=customer-verification npm run agent:cli`.
+
+Try this seeded-data flow:
 
 ```text
 I need Chinese dumplings for 30 people on 2030-06-15.
@@ -135,6 +144,7 @@ $500, Ann Arbor, delivery.
 Buffet style, and we need vegetarian options.
 Show me the first one's menu.
 Let's use that caterer.
+30 Vegetable Dumplings.
 Book it.
 ```
 
@@ -142,7 +152,13 @@ The agent carries known fields forward, calls `search_caterers`, resolves “fir
 
 The rule-based extractor also understands “next Saturday”; it will only return a match when the database has availability for that resolved date. The fixed date above is the seeded, repeatable local demonstration date.
 
-The agent will ask for a menu item instead of guessing one when the customer has not supplied an unambiguous dish selection. This preserves the requirement that an order composition be explicit and grounded in menu data.
+After selecting a caterer, give menu item names and explicit quantities, such as
+`20 Vegetable Dumplings` or `Vegetable Dumplings x 20`. Multiple items can be
+separated with `and`. The agent resolves names against that caterer's active menu
+and saves a `DRAFT` through the backend, which validates ownership and calculates
+the total. Quantities use the menu's listed units; headcount is not an item
+quantity. Say `book it` to submit the saved draft as `REQUESTED`. Draft contents
+survive an agent restart. Unknown or ambiguous names require clarification.
 
 ## Fetch, Agentverse, and ASI:One
 
@@ -153,7 +169,32 @@ source .venv/bin/activate
 npm run agent:fetch
 ```
 
-Set `FETCH_AGENT_MAILBOX=true` to use the documented mailbox/Agentverse connection path, keep `FETCH_AGENT_SEED` private, and use the Agentverse dashboard flow described in Fetch's local-uAgent documentation to inspect or chat with the running agent. The agent publishes the standard chat protocol manifest, which is the compatibility mechanism used by ASI:One.
+`npm run agent:configure` enables mailbox mode in `.env` unless a value is already
+set. For an existing environment, set `FETCH_AGENT_MAILBOX=true`. Keep the existing
+`FETCH_AGENT_SEED`: it determines the agent's identity across restarts.
+
+Follow the [official mailbox guide](https://uagents.fetch.ai/docs/agentverse/mailbox)
+to connect this local agent to your Agentverse account:
+
+1. Keep both `agent:backend` and `agent:fetch` running in separate terminals.
+2. Open the Agent Inspector URL printed by `agent:fetch` and sign in to Agentverse.
+   Allow local-network access if the browser asks; Inspector connects to port 8001
+   on this computer.
+3. In Inspector, choose **Connect**, then **Mailbox**. No additional agent or
+   copied API token is needed for this browser flow.
+4. Confirm the terminal reports `Successfully registered as mailbox agent in
+   Agentverse` and the agent appears under **My Agents** with a **Mailbox** tag.
+5. Use **Chat with Agent** to open ASI:One and try the customer conversation above.
+
+The agent publishes the standard chat protocol manifest and handles chat messages
+and acknowledgements. Mailbox mode routes messages through Agentverse and queues
+messages while the local agent is offline; the local Python process and backend
+must be running to generate replies. Registering a mailbox does not host this
+application for you.
+
+This adapter currently supports customer conversations and maps senders to the
+configured demo customer. Use fictional demo requests until per-sender customer
+authentication is implemented. Caterer management is not exposed by this adapter.
 
 For optional ASI:One extraction, obtain an API key from ASI:One, put it in local `ASI1_API_KEY`, and restart the Python process. The core request state and tools still work without it. Do not expose API keys, mailbox credentials, or agent seeds in source control or logs.
 
@@ -186,7 +227,7 @@ npm run db:demo      # deterministic Phase 2 service demonstration
 npm run agent:backend
 npm run agent:cli
 npm run agent:fetch
-python3 -m unittest fetch_agent.test_conversation
+npm run test:agent   # conversation tests and offline Fetch startup verification
 npm run dashboard    # local read-only caterer dashboard on http://localhost:3000
 ```
 
@@ -243,4 +284,4 @@ tests/         Phase 1/2 Vitest tests
 
 ## Intentional Phase 3 boundaries
 
-There is one primary customer marketplace agent. Caterer-side agent actions, Photon/Spectrum, iMessage, authentication, payments, and multi-agent coordination remain later phases. The only UI is the local, read-only caterer dashboard.
+The customer marketplace agent and caterer operations agent have separate conversation state and tools. The caterer has a Photon/iMessage adapter for one configured owner. Multi-tenant authentication, payments, customer iMessage routing, and multi-agent coordination remain future work.

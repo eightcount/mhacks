@@ -1,9 +1,10 @@
-import { and, eq, gte, inArray, lte } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, lte } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { availability, caterers, menuItems, orderItems, orders, users } from "../db/schema/index.js";
 import type { Order, OrderItem } from "../types/domain.js";
 import {
   createOrderSchema,
+  customerOrdersSchema,
   getOrdersFiltersSchema,
   type CreateOrderInput,
   type GetOrdersFiltersInput
@@ -243,6 +244,36 @@ export async function getOrder(orderId: string): Promise<OrderWithItems> {
   const order = await getOrderRowOrThrow(orderId);
   const items = await db.select().from(orderItems).where(eq(orderItems.orderId, orderId));
   return { order, items };
+}
+
+export async function getCustomerOrder(orderId: string, customerId: string): Promise<OrderWithItems> {
+  const order = await getOrderRowOrThrow(orderId);
+  if (order.customerId !== customerId) throw new DomainError("UNAUTHORIZED_CUSTOMER");
+  const items = await db.select().from(orderItems).where(eq(orderItems.orderId, orderId));
+  return { order, items };
+}
+
+/** Customer identity is mandatory; caller-controlled filters cannot remove its ownership scope. */
+export async function getCustomerOrders(input: unknown) {
+  const parsed = customerOrdersSchema.parse(input);
+  const rows = await db.select({ order: orders, catererName: caterers.businessName })
+    .from(orders).innerJoin(caterers, eq(caterers.id, orders.catererId))
+    .where(and(
+      eq(orders.customerId, parsed.customerId),
+      parsed.status ? eq(orders.status, parsed.status) : undefined,
+      parsed.eventDate ? eq(orders.eventDate, parsed.eventDate) : undefined,
+      parsed.location ? eq(orders.eventLocation, parsed.location) : undefined
+    )).orderBy(desc(orders.createdAt), desc(orders.id)).limit(51);
+  const visible = rows.slice(0, 50);
+  const items = visible.length ? await db.select({
+    orderId: orderItems.orderId, menuItemId: orderItems.menuItemId,
+    name: menuItems.name, quantity: orderItems.quantity, unitPrice: orderItems.unitPrice
+  }).from(orderItems).innerJoin(menuItems, eq(menuItems.id, orderItems.menuItemId))
+    .where(inArray(orderItems.orderId, visible.map(({ order }) => order.id))) : [];
+  return {
+    orders: visible.map((row) => ({ ...row, items: items.filter((item) => item.orderId === row.order.id) })),
+    hasMore: rows.length > 50
+  };
 }
 
 export async function getOrders(filters: GetOrdersFiltersInput = {}): Promise<Order[]> {

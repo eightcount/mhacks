@@ -4,7 +4,8 @@ import {
   createOrder,
   getCaterer,
   getMenu,
-  getOrder,
+  getCustomerOrder,
+  getCustomerOrders,
   requestOrder,
   searchCaterers,
   searchCaterersPartial
@@ -31,7 +32,7 @@ const requestOrderToolSchema = z.object({
   orderId: identifierSchema,
   customerId: identifierSchema
 });
-const getOrderToolSchema = z.object({ orderId: identifierSchema });
+const getOrderToolSchema = z.object({ orderId: identifierSchema, customerId: identifierSchema }).strict();
 
 function publicCaterer(caterer: Awaited<ReturnType<typeof getCaterer>>) {
   return {
@@ -92,5 +93,9 @@ export async function requestOrderTool(input: unknown) {
 
 export async function getOrderTool(input: unknown) {
   const parsed = getOrderToolSchema.parse(input);
-  return { order: await getOrder(parsed.orderId) };
+  return { order: await getCustomerOrder(parsed.orderId, parsed.customerId) };
+}
+
+export async function getOrdersTool(input: unknown) {
+  return getCustomerOrders(input);
 }

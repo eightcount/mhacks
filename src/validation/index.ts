@@ -176,6 +176,17 @@ export const updateRequestStateRequestSchema = requestStateAddressSchema.extend(
   patch: requestStatePatchSchema
 });
 
+export const activateAgentRequestSchema = requestStateAddressSchema.extend({
+  requestConversationId: uuid
+});
+
+export const customerOrdersSchema = z.object({
+  customerId: uuid,
+  status: z.enum(orderStatuses).optional(),
+  eventDate: isoDate.optional(),
+  location: nonEmptyText.max(255).optional()
+}).strict();
+
 export const createOrderSchema = cateringRequestSchema.extend({
   customerId: uuid,
   catererId: uuid,

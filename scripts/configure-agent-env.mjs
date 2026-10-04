@@ -30,6 +30,8 @@ function setIfBlank(key, value) {
 setIfBlank("AGENT_INTERNAL_TOKEN", randomBytes(32).toString("base64url"));
 setIfBlank("FETCH_AGENT_SEED", randomBytes(48).toString("base64url"));
 setIfBlank("FETCH_AGENT_DEFAULT_CUSTOMER_ID", demoCustomerId);
+setIfBlank("FETCH_AGENT_MAILBOX", "true");
+setIfBlank("FETCH_AGENT_LOG_LEVEL", "INFO");
 
 await writeFile(environmentPath, environment);
 console.info("Agent environment initialized. Set DATABASE_URL manually before starting the local agent.");

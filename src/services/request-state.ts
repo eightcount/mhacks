@@ -20,16 +20,7 @@ import {
 import { DomainError } from "./errors.js";
 import { centsToMoney, moneyToCents } from "./money.js";
 
-function mergeTerms(existing: string[], additions: string[]): string[] {
-  const merged = new Map<string, string>();
-  for (const value of [...existing, ...additions]) {
-    const normalized = value.trim().toLocaleLowerCase();
-    if (!merged.has(normalized)) merged.set(normalized, value.trim());
-  }
-  return [...merged.values()];
-}
-
-async function assertConversationCustomer(
+export async function assertConversationCustomer(
   conversationId: string,
   customerId: string
 ): Promise<void> {
@@ -147,7 +138,7 @@ export async function updateRequestState(
 
   const reset = patch.reset === true;
   const update: Partial<typeof cateringRequestStates.$inferInsert> = {
-    updatedAt: new Date()
+    updatedAt: new Date(Math.max(Date.now(), current.updatedAt.getTime() + 1))
   };
   update.eventDate = reset
     ? null
@@ -161,11 +152,11 @@ export async function updateRequestState(
         ? null
         : current.budget
       : centsToMoney(moneyToCents(patch.budget));
-  update.dishes = reset ? [] : patch.dishes ? mergeTerms(current.dishes, patch.dishes) : current.dishes;
+  update.dishes = reset ? [] : patch.dishes ?? current.dishes;
   update.cuisines = reset
     ? []
     : patch.cuisines
-      ? mergeTerms(current.cuisines, patch.cuisines)
+      ? patch.cuisines
       : current.cuisines;
   update.headcount = reset
     ? null
@@ -180,7 +171,7 @@ export async function updateRequestState(
   update.dietaryRestrictions = reset
     ? []
     : patch.dietaryRestrictions
-      ? mergeTerms(current.dietaryRestrictions, patch.dietaryRestrictions)
+      ? patch.dietaryRestrictions
       : current.dietaryRestrictions;
   update.dietaryRestrictionsConfirmed = reset
     ? false

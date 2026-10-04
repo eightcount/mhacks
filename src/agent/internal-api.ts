@@ -7,17 +7,20 @@ import {
   updateRequestState
 } from "../services/request-state.js";
 import { DomainError } from "../services/errors.js";
+import { activateAgentRequest, createAgentRequest, getAgentContext } from "../services/agent-context.js";
 import {
   checkAvailabilityTool,
   createOrderTool,
   getCatererTool,
   getMenuTool,
   getOrderTool,
+  getOrdersTool,
   requestOrderTool,
   searchCaterersTool
 } from "../tools/marketplace-tools.js";
 import {
   appendAgentMessageSchema,
+  activateAgentRequestSchema,
   createAgentSessionSchema,
   requestStateAddressSchema,
   updateRequestStateRequestSchema
@@ -40,7 +43,8 @@ const tools: Record<string, ToolHandler> = {
   check_availability: checkAvailabilityTool,
   create_order: createOrderTool,
   request_order: requestOrderTool,
-  get_order: getOrderTool
+  get_order: getOrderTool,
+  get_orders: getOrdersTool
 };
 
 function writeJson(response: ServerResponse, status: number, body: unknown): void {
@@ -106,6 +110,21 @@ const server = createServer(async (request, response) => {
       const input = updateRequestStateRequestSchema.parse(body);
       const state = await updateRequestState(input.conversationId, input.customerId, input.patch);
       writeJson(response, 200, { state });
+      return;
+    }
+    if (pathname === "/v1/agent/context") {
+      const address = requestStateAddressSchema.parse(body);
+      writeJson(response, 200, await getAgentContext(address.conversationId, address.customerId));
+      return;
+    }
+    if (pathname === "/v1/agent/requests/create") {
+      const address = requestStateAddressSchema.parse(body);
+      writeJson(response, 200, { state: await createAgentRequest(address.conversationId, address.customerId) });
+      return;
+    }
+    if (pathname === "/v1/agent/requests/activate") {
+      const input = activateAgentRequestSchema.parse(body);
+      writeJson(response, 200, { state: await activateAgentRequest(input.conversationId, input.customerId, input.requestConversationId) });
       return;
     }
     if (pathname === "/v1/agent/messages") {

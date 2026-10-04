@@ -79,6 +79,22 @@ class AgentBackendClient:
             {"conversationId": conversation_id, "customerId": customer_id, "patch": patch},
         ))["state"]
 
+    async def get_context(self, conversation_id: str, customer_id: str) -> dict[str, Any]:
+        return await self._post("/v1/agent/context", {
+            "conversationId": conversation_id, "customerId": customer_id,
+        })
+
+    async def create_request(self, conversation_id: str, customer_id: str) -> dict[str, Any]:
+        return (await self._post("/v1/agent/requests/create", {
+            "conversationId": conversation_id, "customerId": customer_id,
+        }))["state"]
+
+    async def activate_request(self, conversation_id: str, customer_id: str, request_conversation_id: str) -> dict[str, Any]:
+        return (await self._post("/v1/agent/requests/activate", {
+            "conversationId": conversation_id, "customerId": customer_id,
+            "requestConversationId": request_conversation_id,
+        }))["state"]
+
     async def append_message(
         self,
         conversation_id: str,

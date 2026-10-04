@@ -1,4 +1,5 @@
 export const domainErrorCodes = [
+  "REQUEST_LIMIT_REACHED",
   "CATERER_NOT_FOUND",
   "CUSTOMER_NOT_FOUND",
   "CONVERSATION_NOT_FOUND",
