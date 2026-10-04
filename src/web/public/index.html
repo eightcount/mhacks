@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Caterer Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <svg xmlns="http://www.w3.org/2000/svg" hidden>
+      <symbol id="i-wallet" viewBox="0 0 24 24">
+        <path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1" />
+        <path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4" />
+      </symbol>
+      <symbol id="i-clipboard" viewBox="0 0 24 24">
+        <rect width="8" height="4" x="8" y="2" rx="1" />
+        <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+        <path d="M12 11h4M12 16h4M8 11h.01M8 16h.01" />
+      </symbol>
+      <symbol id="i-users" viewBox="0 0 24 24">
+        <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+        <circle cx="9" cy="7" r="4" />
+        <path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
+      </symbol>
+      <symbol id="i-refresh" viewBox="0 0 24 24">
+        <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
+        <path d="M21 3v5h-5" />
+        <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
+        <path d="M8 16H3v5" />
+      </symbol>
+    </svg>
+
+    <main class="page">
+      <header class="topbar">
+        <div>
+          <h1>Welcome back<span id="business-name-wrap" hidden>, <span class="accent" id="business-name"></span></span></h1>
+          <p class="subtitle" id="subtitle"></p>
+        </div>
+        <div class="refresh" id="refresh-area" hidden>
+          <span class="updated" id="updated-at" aria-live="polite"></span>
+          <button class="icon-button" id="refresh-button" type="button" aria-label="Refresh dashboard">
+            <svg class="icon" aria-hidden="true"><use href="#i-refresh" /></svg>
+          </button>
+        </div>
+      </header>
+
+      <div class="notice" id="notice" role="alert" hidden>
+        <p class="notice-title" id="notice-title"></p>
+        <p class="notice-body" id="notice-body"></p>
+      </div>
+
+      <div class="dashboard" id="dashboard" hidden>
+        <section class="stats" aria-label="Statistics">
+          <article class="stat">
+            <p class="stat-label">
+              <svg class="icon" aria-hidden="true"><use href="#i-wallet" /></svg>Revenue
+            </p>
+            <p class="stat-value" id="revenue-total">–</p>
+            <p class="stat-sub" id="revenue-sub"></p>
+          </article>
+          <article class="stat">
+            <p class="stat-label">
+              <svg class="icon" aria-hidden="true"><use href="#i-clipboard" /></svg>Orders to fill
+            </p>
+            <p class="stat-value" id="orders-to-fill">–</p>
+            <p class="stat-sub" id="orders-sub"></p>
+          </article>
+          <article class="stat">
+            <p class="stat-label">
+              <svg class="icon" aria-hidden="true"><use href="#i-users" /></svg>Customers
+            </p>
+            <p class="stat-value" id="customers-total">–</p>
+            <p class="stat-sub" id="customers-sub"></p>
+          </article>
+        </section>
+
+        <div class="columns">
+          <section class="card" aria-labelledby="upcoming-heading">
+            <div class="card-head">
+              <h2 id="upcoming-heading">Upcoming</h2>
+              <span class="muted">Accepted orders</span>
+            </div>
+            <ul class="rows scroll-list" id="upcoming-list" tabindex="0" aria-labelledby="upcoming-heading"></ul>
+          </section>
+
+          <section class="card" aria-labelledby="requests-heading">
+            <div class="card-head">
+              <h2 id="requests-heading">Pending requests</h2>
+              <span class="count" id="requests-count">0</span>
+            </div>
+            <ul class="rows scroll-list" id="request-list" tabindex="0" aria-labelledby="requests-heading"></ul>
+          </section>
+        </div>
+
+        <section class="card" aria-labelledby="availability-heading">
+          <div class="card-head">
+            <h2 id="availability-heading">Availability</h2>
+            <span class="muted" id="availability-range"></span>
+          </div>
+          <ol class="calendar" id="availability-list" aria-labelledby="availability-heading"></ol>
+        </section>
+
+        <section class="card" aria-labelledby="menu-heading">
+          <div class="card-head">
+            <h2 id="menu-heading">Menu</h2>
+            <span class="muted">By servings booked</span>
+          </div>
+          <ol class="menu" id="menu-list" aria-labelledby="menu-heading"></ol>
+        </section>
+
+        <section class="card" aria-labelledby="history-heading">
+          <div class="card-head">
+            <h2 id="history-heading">Order history</h2>
+            <span class="muted">Past and closed orders</span>
+          </div>
+          <ul class="rows scroll-list" id="history-list" tabindex="0" aria-labelledby="history-heading"></ul>
+        </section>
+      </div>
+    </main>
+  </body>
+</html>

@@ -66,7 +66,7 @@ export function getCaterer(catererId: string): Promise<Caterer> {
   return getCatererOrThrow(catererId);
 }
 
-async function assertCatererOwner(catererId: string, actorUserId: string): Promise<Caterer> {
+export async function assertCatererOwner(catererId: string, actorUserId: string): Promise<Caterer> {
   const caterer = await getCatererOrThrow(catererId);
   assertCatererOwnership(caterer, actorUserId);
   return caterer;

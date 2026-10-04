@@ -1,5 +1,7 @@
 export * from "./authorization.js";
 export * from "./caterers.js";
+export * from "./dashboard.js";
+export * from "./dashboard-summary.js";
 export * from "./errors.js";
 export * from "./location.js";
 export * from "./matching.js";

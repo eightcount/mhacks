@@ -2,7 +2,7 @@
 
 This project is an agentic catering marketplace connecting customers with local, small, and home-owned caterers through conversational interfaces. The backend stores marketplace data in Neon PostgreSQL and keeps business rules deterministic.
 
-Phase 3 adds one customer-facing Fetch.ai conversational agent. It collects a partial catering request over multiple messages, persists that state, invokes the existing marketplace tools, and turns grounded tool data into concise replies. It does not implement Photon, Spectrum, iMessage, a frontend, authentication, payments, or a multi-agent system.
+Phase 3 adds one customer-facing Fetch.ai conversational agent. It collects a partial catering request over multiple messages, persists that state, invokes the existing marketplace tools, and turns grounded tool data into concise replies. It does not implement Photon, Spectrum, iMessage, authentication, payments, or a multi-agent system. The only UI is a local, read-only [caterer dashboard](#caterer-dashboard).
 
 ## Architecture
 
@@ -187,7 +187,34 @@ npm run agent:backend
 npm run agent:cli
 npm run agent:fetch
 python3 -m unittest fetch_agent.test_conversation
+npm run dashboard    # local read-only caterer dashboard on http://localhost:3000
 ```
+
+## Caterer dashboard
+
+`npm run dashboard` serves a local, read-only dashboard for one caterer at `http://localhost:3000`. The server reads Neon through the TypeScript services (`getCatererDashboard`, which also uses `getMenu`), so `DATABASE_URL` stays on the server and the browser only calls the dashboard's JSON endpoint. It uses Node's built-in `http` module and binds to `127.0.0.1`.
+
+Open it with a caterer ID and the user ID of that caterer's owner. In the shared fictional data, caterer `22000000-0000-4000-8000-00000000000N` is owned by user `11000000-0000-4000-8000-00000000000N` for N = 1–5: Jade Juniper Kitchen, Copper Cactus Taqueria, Verdant Table Collective, Saffron Harbor Mezze, and the inactive Seoul Meadow Supper Club. For example:
+
+```text
+http://localhost:3000/?catererId=22000000-0000-4000-8000-000000000001&actorUserId=11000000-0000-4000-8000-000000000001
+```
+
+Every figure comes from Neon records:
+
+- **Revenue:** stored order totals of `ACCEPTED` and `COMPLETED` orders with an event date in the current month, split into completed and still to fill. Payments are not tracked, so this is booked order value.
+- **Orders to fill** and **Upcoming:** `ACCEPTED` orders with an event date from today on.
+- **Customers:** distinct customers with an `ACCEPTED` or `COMPLETED` order.
+- **Pending requests:** `REQUESTED` orders waiting for the caterer, with event style, fulfillment, dietary restrictions, items, and special requests.
+- **Availability:** the next 14 days of `availability` records. Open days show the date's capacity override, or the caterer's maximum capacity, and the guests already booked. A day without a record shows *Not set*, which search treats as unavailable.
+- **Menu:** every menu item, including inactive ones, with its current price, dietary tags, and servings in booked orders.
+- **Order history:** completed, declined, and cancelled orders, plus accepted orders whose event date has passed.
+
+Draft orders are hidden because the customer has not submitted them. Order lines use each order item's stored price snapshot, and money is added in integer cents.
+
+The page refreshes every 30 seconds and when its tab regains focus, so orders created or changed through the agent's tools appear without agent-specific dashboard code. Add `&today=YYYY-MM-DD` to view the dashboard as of another date. The JSON is at `GET /api/caterers/:catererId/dashboard?actorUserId=...`. Set `DASHBOARD_PORT` to use a port other than 3000.
+
+Until authentication exists, the owner check uses the same actor-ID boundary as the other caterer services: the caller states who they are in the URL. Keep the server local; do not expose it publicly.
 
 ## Project structure
 
@@ -199,10 +226,11 @@ src/
   tools/       Validated, structured agent-callable marketplace tools
   validation/  Zod schemas
   types/       Shared TypeScript domain types
+  web/         Local read-only caterer dashboard (server, page, styles, script)
 fetch_agent/   Python Fetch uAgent, local CLI, extraction, and transport adapter
 tests/         Phase 1/2 Vitest tests
 ```
 
 ## Intentional Phase 3 boundaries
 
-There is one primary customer marketplace agent. Caterer-side agent actions, Photon/Spectrum, iMessage, authentication, payments, UI, and multi-agent coordination remain later phases.
+There is one primary customer marketplace agent. Caterer-side agent actions, Photon/Spectrum, iMessage, authentication, payments, and multi-agent coordination remain later phases. The only UI is the local, read-only caterer dashboard.

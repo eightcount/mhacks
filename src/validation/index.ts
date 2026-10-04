@@ -223,6 +223,17 @@ export const getOrdersFiltersSchema = z
     "eventDateFrom must be before or equal to eventDateTo."
   );
 
+function isCalendarDate(value: string): boolean {
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().startsWith(value);
+}
+
+export const getCatererDashboardSchema = z.object({
+  catererId: uuid,
+  actorUserId: uuid,
+  today: isoDate.refine(isCalendarDate, "Expected a real calendar date.").optional()
+});
+
 export type CreateUserInput = z.input<typeof createUserSchema>;
 export type CreateCatererInput = z.input<typeof createCatererSchema>;
 export type UpdateCatererSettingsInput = z.input<typeof updateCatererSettingsSchema>;
@@ -234,6 +245,7 @@ export type PartialCateringSearchInput = z.input<typeof partialCateringSearchSch
 export type CreateOrderInput = z.input<typeof createOrderSchema>;
 export type GetMenuFiltersInput = z.input<typeof getMenuFiltersSchema>;
 export type GetOrdersFiltersInput = z.input<typeof getOrdersFiltersSchema>;
+export type GetCatererDashboardInput = z.input<typeof getCatererDashboardSchema>;
 export type RequestStatePatchInput = z.input<typeof requestStatePatchSchema>;
 export type CreateAgentSessionInput = z.input<typeof createAgentSessionSchema>;
 export type AppendAgentMessageInput = z.input<typeof appendAgentMessageSchema>;
