@@ -3,10 +3,11 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 const uuid = "[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}";
 export function isPublicCatererRoute(method: string, path: string) {
   return ((method === "GET" || method === "POST") && new RegExp(`^/forms/${uuid}$`).test(path)) ||
+    ((method === "GET" || method === "POST") && new RegExp(`^/cards/${uuid}$`).test(path)) ||
     (method === "GET" && /^\/documents\/[a-f0-9]{64}$/.test(path));
 }
 
-/** A public form gateway deliberately has no owner token or agent route. */
+/** Public forms, read-only documents, and tightly scoped signed cards only. */
 export async function forwardPublicCatererRequest(request: IncomingMessage, response: ServerResponse, backendPort: number) {
   response.setHeader("Cache-Control", "no-store");
   response.setHeader("Referrer-Policy", "no-referrer");
@@ -27,9 +28,11 @@ export async function forwardPublicCatererRequest(request: IncomingMessage, resp
       response.writeHead(415); response.end("Use the order form to submit a request"); return;
     }
     const upstream = await fetch(`http://127.0.0.1:${backendPort}${url.pathname}${url.search}`, {
-      method: request.method || "GET", headers: {"Content-Type": contentType},
+      method: request.method || "GET", headers: {"Content-Type": contentType,
+        ...(request.headers.origin ? {Origin: request.headers.origin} : {}),
+        ...(request.headers["sec-fetch-site"] ? {"Sec-Fetch-Site": String(request.headers["sec-fetch-site"])} : {})},
       ...(request.method === "POST" ? {body: Buffer.concat(chunks)} : {}),
-      signal: AbortSignal.timeout(30000), redirect: "error"
+      signal: AbortSignal.timeout(url.pathname.startsWith("/cards/") ? 150000 : 30000), redirect: "error"
     });
     for (const header of ["content-type", "content-security-policy", "x-content-type-options"]) {
       const value = upstream.headers.get(header);

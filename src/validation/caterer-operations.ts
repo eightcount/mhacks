@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { phoneNumberSchema } from "./contact.js";
 
 export const amountSchema = z.string().regex(/^(?:0|[1-9]\d{0,8})(?:\.\d{1,3})?$/);
 export const measureSchema = z.object({
@@ -29,7 +30,8 @@ export const formSchema = z.object({
   closesAt: z.string().datetime({offset: true}), fulfillmentMethod: z.enum(["PICKUP", "DELIVERY"]),
   fulfillmentInstructions: z.string().trim().min(1).max(1000),
   minimumOrder: money.default("0.00"), deliveryFee: money.default("0.00"),
-  products: z.array(z.object({ productSpecId: z.string().uuid(), maxPackages: z.number().int().min(1).max(10000) }).strict()).min(1).max(50)
+  products: z.array(z.object({ productSpecId: z.string().uuid(), maxPackages: z.number().int().min(1).max(10000),
+    expectedUnitPrice: money.optional() }).strict()).min(1).max(50)
 }).strict().refine(({products}) => new Set(products.map(p => p.productSpecId)).size === products.length, "List each product once");
 export const preorderSchema = z.object({
   submissionId: z.string().uuid(), customerName: z.string().trim().min(1).max(150),
@@ -38,8 +40,15 @@ export const preorderSchema = z.object({
   items: z.array(z.object({ productSpecId: z.string().uuid(), quantity: z.number().int().min(1).max(1000) }).strict()).min(1).max(50)
 }).strict().refine(({items}) => new Set(items.map(i => i.productSpecId)).size === items.length, "List each product once");
 export const statusChangeSchema = z.object({ orderId: z.string().uuid(), status: z.enum(["ACCEPTED", "DECLINED", "CANCELLED", "COMPLETED"]) }).strict();
+export const batchStatusChangeSchema = z.object({orderIds: z.array(z.string().uuid()).min(1).max(50), status: statusChangeSchema.shape.status}).strict()
+  .refine(({orderIds}) => new Set(orderIds).size === orderIds.length, "Select each order once");
+export const orderReceiptSchema = z.object({orderId: z.string().uuid()}).strict();
+export const productionSelectionSchema = z.union([periodSchema, orderReceiptSchema]);
 export const notificationSchema = z.object({
   orderIds: z.array(z.string().uuid()).min(1).max(200),
   deliveryWindow: z.string().trim().min(1).max(200),
   note: z.string().trim().max(500).default("")
+}).strict();
+export const notificationRecipientSchema = z.object({
+  notificationId: z.string().uuid(), recipient: phoneNumberSchema
 }).strict();

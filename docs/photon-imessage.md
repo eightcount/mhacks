@@ -63,8 +63,18 @@ file, and forwards only the restricted public gateway. This workspace uses that
 provider because Cloudflare's outbound connection timed out. Both providers expose
 temporary HTTPS links and require the tunnel process to keep running.
 
-The helper waits for the provider to confirm a connection before saving a new
-public URL. Cloudflare diagnostics are kept in ignored `artifacts/photon-tunnel.log`;
+If a phone rejects the `lhr.life` certificate or that provider loses its tunnel,
+`PHOTON_TUNNEL_PROVIDER=pinggy` selects an alternative HTTPS host using SSH on port
+443. The helper creates a dedicated key in ignored local artifacts; it does not
+use personal SSH keys or require a Pinggy account. Free Pinggy sessions last 60
+minutes, so restart the tunnel and agent and request fresh links afterward.
+Browsers may show Pinggy's one-time welcome page before opening the document;
+this is separate from a browser certificate error. Never bypass a certificate
+warning. See [Pinggy's tunnel documentation](https://pinggy.io/docs/http_tunnels/)
+and [browser screening documentation](https://pinggy.io/docs/http_tunnels/screening/).
+
+The helper checks HTTPS certificate validation and verifies that the public URL
+reaches the restricted gateway before saving it. Cloudflare diagnostics are kept in ignored `artifacts/photon-tunnel.log`;
 the helper suppresses SSH banners and request logs.
 
 The command writes the temporary HTTPS origin to `CATERER_PUBLIC_BASE_URL` in local
@@ -118,6 +128,10 @@ address after startup:
 5. Send the order's date, for example `June 15, 2030`, or a range such as
    `orders June 10–16, 2030`. Then send `accept 1` or `decline 1`.
    A bare `1` explains the available actions; it does not accept an order.
+   Send `receipt 1` for that order's itemized receipt, or use another listed number.
+   If only one order is listed, `receipt` also works. The receipt appears in chat
+   and includes a private printable link when public hosting is configured.
+   It shows saved prices and order status; the app does not record payments.
 6. Send `plan`, then `order ingredients` to prepare all ingredients together for
    the selected day or range. For a fictional basket and private demo document,
    set `INSTACART_DEMO_MODE=true` locally and restart `photon:start`; no API key
@@ -127,12 +141,18 @@ address after startup:
    Accepted orders contribute to production. The label link expires in one hour;
    request labels again if needed.
 7. `notify` keeps that selected period and drafts customer updates. Review the recipient and
-   body. Only `send notification 1 confirm` submits a draft to iMessage. The form
+   body. To enter a number manually, send `notification 1 to +12025550143` with
+   your own number and review the revised draft. Only that draft is changed;
+   this works without the public form tunnel. Say `send notification` to submit
+   the only draft or the draft you just updated to iMessage, using its saved
+   recipient. No phone number or `confirm` is needed. If several drafts are
+   waiting and none is selected, use a listed number, e.g. `send notification 2`.
+   The form
    contact must be an international phone number or an Apple ID email reachable
    through iMessage. Test with a contact you control.
 
 `June 10th`, `orders tomorrow`, and `plan next week` also work. Dates without a
-year use the last selected year, or the current year for a new conversation.
+year use the current year in the caterer's local time zone, even after an older search.
 Replies show the resolved date and year. `orders` alone returns to this week;
 follow-up reports keep the selected dates across restarts.
 
@@ -175,6 +195,29 @@ space fields. Project-wide strict TypeScript settings remain enabled. Telemetry
 and SDK logging are disabled; application logs omit sender IDs, message bodies,
 and credentials.
 
+## Text replies and web links
+
+Photon/iMessage and ASI:One/Fetch use typed conversation. Text `menu`, `new form`,
+or `orders October 10` in the configured owner DM. Choose products and quantities
+with `1:50, 2:30`, review the form, then type `publish`. Use numbered commands such
+as `accept 1`, `receipt 1`, and `send notification 1` after reviewing the listed
+order or notification.
+
+The iMessage worker sends ordinary text and browser links for forms, receipts,
+labels, and grocery documents. It does not send Spectrum mini-app cards or owner
+control links, including when an older cached reply contains card metadata.
+The Spectrum SDK remains the messaging transport; its iMessage extension is not
+needed to read replies or use the web links.
+
+Previously sent cards remain in the iMessage history. Send a new text command
+instead of reopening an old card. Old card actions are disabled in the bridge;
+saved setup conversations continue with typed answers.
+
+Keep `photon:start` running, and keep the public HTTPS tunnel running for web
+links. Restart `photon:start` after changing the agent or worker code. A tunnel
+restart requires restarting the agent and requesting fresh links with `forms` or
+the relevant document command. Free tunnels can expire or show a welcome page.
+
 ## Developer verification
 
 ```bash
@@ -195,6 +238,7 @@ The grocery demo check creates a fictional accepted catering order on that branc
 verifies its signed basket document, then closes the form and completes the order.
 It makes no retailer calls and saves a sample to `artifacts/caterer-groceries-demo.html`.
 Fictional test records remain on the disposable branch.
+The verification also checks that the bridge returns text without card metadata.
 
 Official references: [Spectrum setup and persistent streams](https://github.com/photon-hq/spectrum-ts),
 [Cloudflare development tunnels](https://developers.cloudflare.com/tunnel/get-started/quick-tunnels/).

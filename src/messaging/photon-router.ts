@@ -36,8 +36,11 @@ export async function routePhotonMessage(message: PhotonInbound, deps: PhotonRou
   if (!state.claimed || !state.reply) return "DUPLICATE";
   try {
     let replyText = state.reply.text;
+    // Send text and ordinary document links, including when a cached reply
+    // from an older process still contains interactive card metadata.
     if (state.reply.html) {
-      const title = state.reply.documentKind === "grocery_demo" ? "View your demo grocery basket" : "Print your labels";
+      const title = state.reply.documentKind === "grocery_demo" ? "View your demo grocery basket"
+        : state.reply.documentKind === "receipt" ? "View or print your receipt" : "Print your labels";
       replyText += state.documentUrl ? `\n${title}: ${state.documentUrl}\nThis private link expires in one hour.`
         : "\nUse the local caterer CLI to save this document until a public form URL is configured.";
     }

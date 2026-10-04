@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { randomBytes, randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { parse } from "dotenv";
 
@@ -15,6 +15,7 @@ const server = spawn("node", ["--import", "tsx", "src/agent/caterer-api.ts"], {
   stdio: ["ignore", "pipe", "pipe"]
 });
 server.stderr.resume(); // Do not expose database connection failures or records.
+let stage = "backend-startup";
 try {
   const port = await new Promise((resolve, reject) => {
     const timeout = setTimeout(() => reject(new Error("Backend startup timed out")), 15000);
@@ -25,6 +26,7 @@ try {
     });
   });
   const base = `http://127.0.0.1:${port}`;
+  stage = "authentication";
   assert.equal((await fetch(`${base}/tools/menu`, {method: "POST"})).status, 401);
   const tool = async (name, body) => {
     const response = await fetch(`${base}/tools/${name}`, {method: "POST", headers: {Authorization: `Bearer ${token}`, "Content-Type": "application/json"}, body: JSON.stringify(body)});
@@ -32,11 +34,33 @@ try {
     assert.equal(response.status, 200, `Tool ${name} failed: ${result.error ?? 'unexpected status'}`);
     return result;
   };
-  const {products} = await tool("recipes", {});
-  assert(products[0]);
-  const {form} = await tool("create_form", {title: "Fictional <browser> verification", fulfillmentDate: "2099-07-15",
-    closesAt: "2099-07-10T18:00:00-04:00", fulfillmentMethod: "DELIVERY", fulfillmentInstructions: "Fictional demo delivery",
-    minimumOrder: "0.00", products: [{productSpecId: products[0].id, maxPackages: 2}]});
+  const session = `photon-chat:${randomBytes(32).toString("hex")}`;
+  const conversation = (phase, formId = "") => new Promise((resolve, reject) => {
+    const python = spawn(existsSync(".venv/bin/python") ? ".venv/bin/python" : "python3",
+      ["-m", "fetch_agent.verify_caterer_conversation", phase], {
+        env: {...process.env, CATERER_INTERNAL_TOKEN: token, CATERER_BACKEND_PORT: String(port),
+          CATERER_VERIFY_SESSION: session, CATERER_VERIFY_FORM: formId, CATERER_CONVERSATION_VERIFY: "isolated-http-harness"},
+        stdio: ["ignore", "pipe", "pipe"]
+      });
+    let output = "";
+    python.stdout.on("data", chunk => {output += String(chunk);});
+    python.stderr.on("data", chunk => {
+      // The verifier emits only fixed stage names, never backend response text.
+      const safe = /Conversation verification failed at ([a-z-]+)\./.exec(String(chunk));
+      if (safe) stage = `conversation-${safe[1]}`;
+    });
+    const timeout = setTimeout(() => {python.kill("SIGTERM"); reject(new Error("Conversation verification timed out"));}, 120000);
+    python.once("error", () => {clearTimeout(timeout); reject(new Error("Python could not start"));});
+    python.once("exit", code => {
+      clearTimeout(timeout);
+      if (code !== 0) return reject(new Error(`Conversation ${phase} verification failed`));
+      try {resolve(JSON.parse(output));} catch {reject(new Error("Invalid verification result"));}
+    });
+  });
+  stage = "form-conversation";
+  const {formId, productSpecId} = await conversation("create");
+  const form = {id: formId};
+  stage = "public-form";
   const page = await fetch(`${base}/forms/${form.id}`);
   assert.equal(page.status, 200);
   const html = await page.text();
@@ -46,16 +70,19 @@ try {
   const submissionId = /name="submissionId" value="([^"]+)"/.exec(html)?.[1];
   assert(submissionId);
   const post = async body => fetch(`${base}/forms/${form.id}`, {method: "POST", headers: {"Content-Type": "application/x-www-form-urlencoded"}, body: new URLSearchParams(body)});
-  const fields = {submissionId, customerName: "Fictional Browser Customer", customerContact: "browser@example.invalid", deliveryAddress: "Fictional test street", [`item:${products[0].id}`]: "2"};
+  const fields = {submissionId, customerName: "Fictional Browser Customer", customerContact: "browser@example.invalid", deliveryAddress: "Fictional test street", [`item:${productSpecId}`]: "2"};
+  stage = "submission";
   const receipt = await post(fields);
   assert.equal(receipt.status, 200); assert((await receipt.text()).includes("REQUESTED"));
   assert.equal((await post(fields)).status, 200);
   const soldOut = await post({...fields, submissionId: randomUUID()});
   assert.equal(soldOut.status, 400); assert((await soldOut.text()).includes("enough packages"));
-  const {orders} = await tool("orders", {start: "2099-07-15", end: "2099-07-15"});
+  const {orders} = await tool("orders", {start: "2099-07-11", end: "2099-07-11"});
   assert(orders.some(order => order.formId === form.id));
-  console.info("PASS: authenticated tools, public HTML form, escaped content, submission, repeat submission, sold-out validation, and owner order retrieval.");
+  stage = "order-lookup";
+  assert.equal((await conversation("lookup", form.id)).verified, true);
+  console.info("PASS: authenticated conversation, restart-safe draft, natural dates, reviewed publication, public form submission, idempotency, capacity and natural order lookup on isolated Neon.");
 } catch (error) {
-  console.error("HTTP verification failed:", error.name, error.message);
+  console.error("HTTP verification failed:", stage, error.name); // Never expose response bodies or database details.
   process.exitCode = 1;
 } finally {server.kill("SIGTERM");}

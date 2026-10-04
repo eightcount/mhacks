@@ -27,6 +27,29 @@ function harness() {
   return {receipts, agent, send, tool, owner, projectId: "fictional-project", startedAt: 1000};
 }
 describe("Photon owner routing", () => {
+  it("delivers only text when an older agent includes interactive card metadata", async () => {
+    const deps = harness();
+    const card = {id: "99000000-0000-4000-8000-000000000001", title: "Manage orders", fields: [], actions: [{id: "accept" as const, label: "Accept selected"}]};
+    deps.agent.mockResolvedValue({text: "Choose orders", card});
+    expect(await routePhotonMessage(incoming, deps)).toBe("SENT");
+    expect(deps.send).toHaveBeenCalledWith(incoming.chatId, "Choose orders");
+    expect(deps.tool.mock.calls.every(([name]) => name === "photon_receipt")).toBe(true);
+    expect(await routePhotonMessage(incoming, deps)).toBe("DUPLICATE");
+    expect(deps.send).toHaveBeenCalledTimes(1);
+  });
+  it("recovers a cached card reply as text without repeating the agent action", async () => {
+    const deps = harness();
+    const card = {id: "99000000-0000-4000-8000-000000000001", title: "Manage orders", fields: [], actions: [{id: "accept" as const, label: "Accept selected"}]};
+    await routePhotonMessage(incoming, deps);
+    deps.receipts.set([...deps.receipts.keys()][0]!, {status: "READY", reply: {text: "Choose orders", card}});
+    deps.agent.mockClear(); deps.send.mockClear(); deps.tool.mockClear();
+    expect(await routePhotonMessage(incoming, deps)).toBe("SENT");
+    expect(deps.send).toHaveBeenCalledWith(incoming.chatId, "Choose orders");
+    expect(deps.tool.mock.calls.every(([name]) => name === "photon_receipt")).toBe(true);
+    expect(await routePhotonMessage(incoming, deps)).toBe("DUPLICATE");
+    expect(deps.send).toHaveBeenCalledTimes(1);
+    expect(deps.agent).not.toHaveBeenCalled();
+  });
   it.each([
     {sender: "stranger@example.invalid"}, {sender: ""}, {direction: "outbound"},
     {chatType: "group"}, {platform: "sms"}, {timestamp: new Date(999)},
@@ -94,6 +117,22 @@ describe("Photon owner routing", () => {
     expect(await routePhotonMessage({...incoming, text: "order ingredients"}, routed)).toBe("DUPLICATE");
     expect(deps.agent).toHaveBeenCalledTimes(1);
   });
+  it.each([true, false])("delivers itemized receipt text with optional printable link: %s", async hasLink => {
+    const deps = harness();
+    const text = "Order receipt\nTotal: $26.25\nPayment not recorded.";
+    deps.agent.mockResolvedValue({text, html: "<h1>Order receipt</h1>", documentKind: "receipt"});
+    const receiptTool = deps.tool;
+    const documentUrl = "https://forms.example.invalid/documents/demo";
+    const routed = {...deps, tool: async (name: string, input: unknown) => ({...await receiptTool(name, input), ...(hasLink ? {documentUrl} : {})})};
+    expect(await routePhotonMessage({...incoming, text: "receipt 1"}, routed)).toBe("SENT");
+    const response = deps.send.mock.calls[0]?.[1];
+    expect(response).toContain(text);
+    expect(response).not.toContain("Print your labels");
+    if (hasLink) expect(response).toContain(`View or print your receipt: ${documentUrl}`);
+    else expect(response).toContain("local caterer CLI");
+    expect(await routePhotonMessage({...incoming, text: "receipt 1"}, routed)).toBe("DUPLICATE");
+    expect(deps.send).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("Photon notification boundary", () => {
@@ -142,5 +181,10 @@ describe("configuration and public routes", () => {
     for (const path of ["/tools/menu", "/caterer/message", "/health", "/forms/../tools/menu", "/forms/x", "/notifications/send"]) expect(isPublicCatererRoute("POST", path)).toBe(false);
     expect(isPublicCatererRoute("DELETE", form)).toBe(false);
     expect(isPublicCatererRoute("POST", `/documents/${"a".repeat(64)}`)).toBe(false);
+    const card = "/cards/99000000-0000-4000-8000-000000000001";
+    expect(isPublicCatererRoute("GET", card)).toBe(true);
+    expect(isPublicCatererRoute("POST", card)).toBe(true);
+    expect(isPublicCatererRoute("DELETE", card)).toBe(false);
+    expect(isPublicCatererRoute("POST", "/cards/../tools/change_orders")).toBe(false);
   });
 });

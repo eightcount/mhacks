@@ -14,9 +14,10 @@ const productsSchema = z.object({data: z.array(z.object({productId: z.string(), 
 export async function findGroceryOffers(actor: CatererActor, period: unknown) {
   const plan = await productionPlan(actor, period);
   const ingredients = plan.ingredients;
+  const details = {ingredients, period: plan.period, ...(plan.orderId ? {orderId: plan.orderId} : {})};
   const token = process.env.KROGER_ACCESS_TOKEN, locationId = process.env.KROGER_LOCATION_ID;
-  if (!ingredients.length) return {status: "EMPTY", ingredients, offers: [], message: "There are no accepted orders to shop for."};
-  if (!token || !locationId) return {status: "NOT_CONNECTED", ingredients, offers: [], message: "Connect a Kroger API access token and choose a store location to check current ingredient promotions."};
+  if (!ingredients.length) return {status: "EMPTY", ...details, offers: [], message: "There are no accepted orders to shop for."};
+  if (!token || !locationId) return {status: "NOT_CONNECTED", ...details, offers: [], message: "Connect a Kroger API access token and choose a store location to check current ingredient promotions."};
   if (!/^\d{1,20}$/.test(locationId)) throw new CatererOperationError("Configure a valid Kroger store location ID.");
   if (ingredients.length > 30) throw new CatererOperationError("Choose a smaller production date range to search up to 30 ingredients at a time.");
   const offers = [];
@@ -40,6 +41,6 @@ export async function findGroceryOffers(actor: CatererActor, period: unknown) {
     }));
     offers.push(...found);
   }
-  return {status: "READY", source: "Kroger", locationId, checkedAt: new Date().toISOString(), ingredients, offers,
+  return {status: "READY", source: "Kroger", locationId, checkedAt: new Date().toISOString(), ...details, offers,
     message: "Current promotions among the first five search matches per ingredient at your configured store. Confirm product suitability, pack sizes, promotion terms and pickup availability. No expiry or purchase quantity is inferred."};
 }

@@ -27,7 +27,7 @@ async function main() {
     CATERER_PUBLIC_BASE_URL: "https://forms.example.invalid", CATERER_NOTIFICATION_WEBHOOK_URL: "",
     INSTACART_API_KEY: "", INSTACART_DEMO_MODE: "true"
   });
-  const {closeDatabaseConnection} = await import("../src/db/index.js");
+  const {db, closeDatabaseConnection} = await import("../src/db/index.js");
   const {callCatererAgent, callCatererTool} = await import("../src/messaging/caterer-client.js");
   const {photonReceipt} = await import("../src/services/photon-receipts.js");
   const children: ChildProcess[] = [];
@@ -72,7 +72,7 @@ async function main() {
       const result = await callCatererTool("session", {sessionId: dateSession}) as {draft: {period: unknown}};
       return result.draft.period;
     };
-    for (const text of ["June 10, 2030", "June 10th", "plan", "order ingredients"]) {
+    for (const text of ["June 10, 2030", "plan", "order ingredients"]) {
       const reply = await callCatererAgent(dateSession, text);
       assert(reply.text.includes("June 10, 2030"), "Report must retain the selected day and year");
       assert.deepEqual(await savedPeriod(), selectedDay);
@@ -80,6 +80,10 @@ async function main() {
     const invalidDate = await callCatererAgent(dateSession, "February 30th");
     assert(invalidDate.text.includes("valid calendar date"));
     assert.deepEqual(await savedPeriod(), selectedDay);
+    const currentYear = new Intl.DateTimeFormat("en-US", {year: "numeric", ...(process.env.CATERER_TIMEZONE ? {timeZone: process.env.CATERER_TIMEZONE} : {})}).format(new Date());
+    const freshDate = await callCatererAgent(dateSession, "orders October 10");
+    assert(freshDate.text.includes(`October 10, ${currentYear}`), "A new date must not inherit the previous search year");
+    assert.deepEqual(await savedPeriod(), {start: `${currentYear}-10-10`, end: `${currentYear}-10-10`});
     console.info("PASS: natural single-day orders, persisted report dates, combined grocery command, and invalid-date recovery.");
 
     // A genuinely competing database claim, independent of process memory.
@@ -135,9 +139,71 @@ async function main() {
     assert.equal(await routePhotonMessage(shoppingMessage, deps), "DUPLICATE");
     mkdirSync("artifacts", {recursive: true});
     writeFileSync("artifacts/caterer-groceries-demo.html", demoHtml);
+
+    // Request a receipt through the same owner chat, with in-memory outbound replies.
+    assert.equal(await routePhotonMessage({...message, id: randomUUID(), text: "orders August 17, 2099"}, deps), "SENT");
+    const listed = await callCatererTool("orders", {start: "2099-08-17", end: "2099-08-17"}) as {orders: {id: string}[]};
+    const receiptNumber = listed.orders.findIndex(item => item.id === order.orderId) + 1;
+    assert(receiptNumber > 0);
+    const receiptStart = replies.length;
+    const receiptMessage = {...message, id: randomUUID(), text: `receipt ${receiptNumber}`};
+    assert.equal(await routePhotonMessage(receiptMessage, deps), "SENT");
+    const receiptReply = replies.slice(receiptStart).join("");
+    assert(receiptReply.includes(`Order: ${order.orderId}`));
+    assert(receiptReply.includes(`Total: $${order.total}`));
+    assert(receiptReply.includes("Order status: ACCEPTED") && receiptReply.includes("does not confirm payment"));
+    assert(receiptReply.includes("View or print your receipt"));
+    const receiptLink = receiptReply.match(/https:\/\/forms\.example\.invalid\/documents\/\S+/)?.[0];
+    assert(receiptLink);
+    const receiptUrl = new URL(receiptLink);
+    const receiptDocument = await fetch(`${publicBase}${receiptUrl.pathname}${receiptUrl.search}`);
+    assert.equal(receiptDocument.status, 200);
+    const receiptHtml = await receiptDocument.text();
+    assert(receiptHtml.includes(order.orderId) && receiptHtml.includes(`$${order.total}`));
+    assert.equal((await fetch(`${publicBase}${receiptUrl.pathname}`)).status, 400);
+    assert.equal(await routePhotonMessage(receiptMessage, deps), "DUPLICATE");
+    const {createOrderReceipt} = await import("../src/services/caterer-documents.js");
+    await assert.rejects(createOrderReceipt({catererId: "22000000-0000-4000-8000-000000000002", actorUserId: "11000000-0000-4000-8000-000000000002"}, {orderId: order.orderId}));
+    writeFileSync("artifacts/caterer-receipt-demo.html", receiptHtml);
+    console.info("PASS: listed order → Fetch → itemized receipt and signed printable document; foreign and unsigned access rejected.");
+
+    const notificationSession = `photon-chat:${randomBytes(32).toString("hex")}`;
+    await callCatererAgent(notificationSession, "notify August 17, 2099");
+    await callCatererAgent(notificationSession, "August 17, 2–3 PM Eastern");
+    const notificationState = await callCatererTool("session", {sessionId: notificationSession}) as {draft: {notifications: string[]}};
+    const notificationId = notificationState.draft.notifications[0];
+    assert(notificationId);
+    const redirected = await callCatererAgent(notificationSession, "notification 1 to +1 (202) 555-0143");
+    assert(redirected.text.includes("+12025550143") && redirected.text.includes("Nothing has been sent"));
+    const {catererNotificationDrafts, catererPreorders} = await import("../src/db/schema/index.js");
+    const {eq} = await import("drizzle-orm");
+    const [draft] = await db.select().from(catererNotificationDrafts).where(eq(catererNotificationDrafts.id, notificationId));
+    assert(draft && draft.status === "DRAFT" && draft.recipient === "+12025550143");
+    const [originalOrder] = await db.select().from(catererPreorders).where(eq(catererPreorders.id, draft.orderId));
+    assert.equal(originalOrder?.customerContact, "grocery-test@example.invalid");
+    // Exercise the simple command with the outbound transport explicitly disabled above.
+    const send = await callCatererAgent(notificationSession, "send notification");
+    assert(send.text.includes("Notification remains a draft. Connect"));
+    const [unsent] = await db.select().from(catererNotificationDrafts).where(eq(catererNotificationDrafts.id, notificationId));
+    assert(unsent && unsent.status === "DRAFT" && unsent.recipient === "+12025550143");
+    const invalidPhone = await callCatererAgent(notificationSession, "notification 1 to 2025550143");
+    assert(invalidPhone.text.includes("country code"));
+    const {updateNotificationRecipient} = await import("../src/services/caterer-operations.js");
+    await assert.rejects(updateNotificationRecipient({catererId: "22000000-0000-4000-8000-000000000002", actorUserId: "11000000-0000-4000-8000-000000000002"}, {notificationId, recipient: "+12025550144"}));
+    // Model an already claimed test draft without calling a messaging transport.
+    await db.update(catererNotificationDrafts).set({status: "SENDING"}).where(eq(catererNotificationDrafts.id, notificationId));
+    const claimed = await callCatererAgent(notificationSession, "notification 1 to +12025550144");
+    assert(claimed.text.includes("Only your unsent notification drafts"));
+    const [unchanged] = await db.select().from(catererNotificationDrafts).where(eq(catererNotificationDrafts.id, notificationId));
+    assert.equal(unchanged?.recipient, "+12025550143");
+    console.info("PASS: simple send uses the saved draft; manual phone persists and rejects invalid, foreign, or claimed edits.");
+
     await callCatererTool("close_form", {formId: form.form.id});
     await callCatererTool("change_order", {orderId: order.orderId, status: "COMPLETED"});
     console.info("PASS: accepted orders → sample grocery basket → Fetch → signed phone document, with no retailer calls.");
+    const menuReply = await callCatererAgent(notificationSession, "menu");
+    assert(menuReply.text.length > 0 && !menuReply.card);
+    console.info("PASS: iMessage bridge returns text without interactive cards.");
     console.info("No real messages sent; shared database unchanged.");
   } finally {
     publicServer.closeAllConnections(); publicServer.close();

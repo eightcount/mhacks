@@ -1,14 +1,16 @@
 import { z } from "zod";
 import { productionPlan, type CatererActor } from "./caterer-operations.js";
-import { periodSchema } from "../validation/caterer-operations.js";
+import { productionSelectionSchema } from "../validation/caterer-operations.js";
 import { createDemoGroceryBasket } from "./grocery-demo.js";
 
 /** Creates a reviewable shopping link. This API does not place a pickup order. */
-export async function createGroceryList(actor: CatererActor, period: unknown) {
-  const dates = periodSchema.parse(period);
-  const plan = await productionPlan(actor, dates);
+export async function createGroceryList(actor: CatererActor, input: unknown) {
+  const selection = productionSelectionSchema.parse(input);
+  const plan = await productionPlan(actor, selection);
+  const dates = plan.period;
   if (!plan.ingredients.length) return {status: "EMPTY", ingredients: [], message: "There are no accepted orders to shop for."};
-  const details = {ingredients: plan.ingredients, period: dates, ingredientCount: plan.ingredients.length};
+  const details = {ingredients: plan.ingredients, period: dates, ingredientCount: plan.ingredients.length,
+    ...(plan.orderId ? {orderId: plan.orderId} : {})};
   if (process.env.INSTACART_DEMO_MODE === "true") return {...details, ...createDemoGroceryBasket(plan.ingredients, dates)};
   const key = process.env.INSTACART_API_KEY;
   if (!key) return {status: "NOT_CONNECTED", ...details, message: "Your complete ingredient list is ready. Instacart isn't connected yet, so I can't create the shopping link. No grocery order has been placed."};
@@ -23,12 +25,14 @@ export async function createGroceryList(actor: CatererActor, period: unknown) {
       return {name: item.name, display_text: `${item.amount} ${item.unit} ${item.name}`,
         line_item_measurements: [{quantity, unit}]};
     });
-    const title = dates.start === dates.end ? `Catering ingredients for ${dates.start}` : `Catering ingredients: ${dates.start} to ${dates.end}`;
+    const title = "orderId" in selection ? `Catering ingredients for one order on ${dates.start}`
+      : dates.start === dates.end ? `Catering ingredients for ${dates.start}` : `Catering ingredients: ${dates.start} to ${dates.end}`;
     const response = await fetch(`${base}/idp/v1/products/products_link`, {
       method: "POST", headers: {Authorization: `Bearer ${key}`, "Content-Type": "application/json", Accept: "application/json"},
       signal: AbortSignal.timeout(20000),
       body: JSON.stringify({title, link_type: "shopping_list", expires_in: 7,
-        instructions: ["Combined ingredient requirements for all accepted catering orders in the selected dates.",
+        instructions: ["orderId" in selection ? "Ingredient requirements for the selected accepted catering order only."
+          : "Combined ingredient requirements for all accepted catering orders in the selected dates.",
           "Quantities cover whole recipe batches, rounded up. Check product matches and pack sizes; remove ingredients already on hand.",
           "Select your store, review prices and substitutions, and choose pickup if available before checkout."],
         line_items: lineItems})

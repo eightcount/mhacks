@@ -10,12 +10,35 @@ const ingredients = [{name: "Flour", amount: "1250", unit: "g"}];
 const fetchMock = vi.fn();
 const period = {start: "2030-06-10", end: "2030-06-10"};
 beforeEach(() => {
-  fake.plan.mockResolvedValue({ingredients}); fetchMock.mockReset(); vi.stubGlobal("fetch", fetchMock);
+  fake.plan.mockReset(); fake.plan.mockResolvedValue({ingredients, period}); fetchMock.mockReset(); vi.stubGlobal("fetch", fetchMock);
   for (const key of ["INSTACART_API_KEY", "INSTACART_DEMO_MODE", "KROGER_ACCESS_TOKEN", "KROGER_LOCATION_ID"]) vi.stubEnv(key, "");
 });
 afterEach(() => {vi.unstubAllGlobals(); vi.unstubAllEnvs();});
 
 describe("ingredient shopping providers", () => {
+  it("keeps a single accepted order's selection in both the calculated list and Instacart request", async () => {
+    const orderId = "99000000-0000-4000-8000-000000000001";
+    fake.plan.mockResolvedValue({ingredients, period, orderId});
+    vi.stubEnv("INSTACART_API_KEY", "fictional-test-key");
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({products_link_url: "https://www.instacart.com/store/shopping_lists/test"})));
+    const result = await createGroceryList(actor, {orderId});
+    expect(fake.plan).toHaveBeenCalledWith(actor, {orderId});
+    expect(result).toMatchObject({orderId, period, ingredients, ingredientCount: 1});
+    const payload = JSON.parse(fetchMock.mock.calls[0]![1].body);
+    expect(payload.title).toBe("Catering ingredients for one order on 2030-06-10");
+    expect(payload.instructions[0]).toContain("selected accepted catering order only");
+    expect(payload.line_items).toHaveLength(1);
+    expect(result.message).toContain("No grocery order has been placed");
+  });
+  it("keeps the single-order calculation in demo mode and rejects unauthorized selections before shopping", async () => {
+    const orderId = "99000000-0000-4000-8000-000000000001";
+    vi.stubEnv("INSTACART_DEMO_MODE", "true");
+    fake.plan.mockResolvedValueOnce({ingredients, period, orderId});
+    expect(await createGroceryList(actor, {orderId})).toMatchObject({orderId, status: "DEMO_READY", ingredients});
+    fake.plan.mockRejectedValueOnce(new Error("Order not found for this caterer."));
+    await expect(createGroceryList(actor, {orderId})).rejects.toThrow("not found for this caterer");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
   it("builds a clearly fictional document without calling Instacart, even if a key exists", async () => {
     vi.stubEnv("INSTACART_DEMO_MODE", "true");
     vi.stubEnv("INSTACART_API_KEY", "fictional-test-key");
@@ -30,7 +53,7 @@ describe("ingredient shopping providers", () => {
     vi.stubEnv("INSTACART_DEMO_MODE", "true");
     fake.plan.mockRejectedValueOnce(new Error("Not authorized"));
     await expect(createGroceryList(actor, period)).rejects.toThrow("Not authorized");
-    fake.plan.mockResolvedValue({ingredients: []});
+    fake.plan.mockResolvedValue({ingredients: [], period});
     expect(await createGroceryList(actor, period)).toMatchObject({status: "EMPTY"});
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -59,7 +82,7 @@ describe("ingredient shopping providers", () => {
       {productSpecId: "first", productName: "First", packages: 6, spec},
       {productSpecId: "second", productName: "Second", packages: 6, spec: second}
     ]);
-    fake.plan.mockResolvedValue({...plan, acceptedOrders: 2});
+    fake.plan.mockResolvedValue({...plan, acceptedOrders: 2, period});
     vi.stubEnv("INSTACART_API_KEY", "fictional-test-key"); vi.stubEnv("INSTACART_ENVIRONMENT", "production");
     fetchMock.mockResolvedValue(new Response(JSON.stringify({products_link_url: "https://www.instacart.com/store/shopping_lists/test"})));
     const result = await createGroceryList(actor, period);
@@ -76,7 +99,7 @@ describe("ingredient shopping providers", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
   it("does not call Instacart without accepted ingredients or for an invalid range", async () => {
-    fake.plan.mockResolvedValue({ingredients: []});
+    fake.plan.mockResolvedValue({ingredients: [], period});
     vi.stubEnv("INSTACART_API_KEY", "fictional-test-key");
     expect(await createGroceryList(actor, period)).toMatchObject({status: "EMPTY"});
     await expect(createGroceryList(actor, {start: "2030-02-30", end: "2030-03-01"})).rejects.toThrow();

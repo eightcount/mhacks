@@ -2,12 +2,14 @@ import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db/index.js";
 import { catererAgentSessions, catererOrderForms, menuItems } from "../db/schema/index.js";
-import { authorizeCaterer, changePreorderStatus, createOrderForm, draftNotifications, listPreorders, listProductSpecs, productionPlan, saveProductSpec, type CatererActor } from "../services/caterer-operations.js";
-import { createLabels } from "../services/caterer-documents.js";
+import { authorizeCaterer, changePreorderStatus, changePreorderStatuses, createOrderForm, draftNotifications, listPreorders, listProductSpecs, productionPlan, saveProductSpec, updateNotificationRecipient, type CatererActor } from "../services/caterer-operations.js";
+import { createLabels, createOrderReceipt } from "../services/caterer-documents.js";
 import { createGroceryList } from "../services/grocery-shopping.js";
 import { sendCatererNotification } from "../messaging/caterer-notifications.js";
 import { findGroceryOffers } from "../services/grocery-offers.js";
 import { photonReceipt, photonDocumentUrl, photonNotification } from "../services/photon-receipts.js";
+import { createPhotonCard } from "../services/photon-cards.js";
+import { getOrderFormOptions, previewOrderForm } from "../services/caterer-operations.js";
 
 export async function runCatererTool(actor: CatererActor, name: string, input: unknown): Promise<unknown> {
   // Actor comes exclusively from the authenticated API session, never model input.
@@ -18,6 +20,11 @@ export async function runCatererTool(actor: CatererActor, name: string, input: u
     }
     case "recipes": return {products: await listProductSpecs(actor)};
     case "save_recipe": return {product: await saveProductSpec(actor, input)};
+    case "form_options": {
+      z.object({}).strict().parse(input);
+      return getOrderFormOptions(actor);
+    }
+    case "preview_form": return {form: await previewOrderForm(actor, input)};
     case "create_form": {
       const form = await createOrderForm(actor, input);
       const base = (process.env.CATERER_PUBLIC_BASE_URL || "http://127.0.0.1:4002").replace(/\/$/, "");
@@ -38,14 +45,18 @@ export async function runCatererTool(actor: CatererActor, name: string, input: u
       return {form};
     }
     case "orders": return {orders: await listPreorders(actor, input)};
+    case "order_receipt": return createOrderReceipt(actor, input);
     case "change_order": return {order: await changePreorderStatus(actor, input)};
+    case "change_orders": return {orders: await changePreorderStatuses(actor, input)};
     case "production_plan": return productionPlan(actor, input);
     case "labels": return createLabels(actor, input);
     case "grocery_list": return createGroceryList(actor, input);
     case "grocery_offers": return findGroceryOffers(actor, input);
     case "draft_notifications": return {notifications: await draftNotifications(actor, input)};
+    case "update_notification_recipient": return {notification: await updateNotificationRecipient(actor, input)};
     case "send_notification": return sendCatererNotification(actor, input);
     case "photon_notification": return photonNotification(actor, input);
+    case "photon_card": return createPhotonCard(actor, input);
     case "photon_receipt": {
       const result = await photonReceipt(actor, input);
       const key = z.object({key: z.string().regex(/^[a-f0-9]{64}$/)}).parse(input).key;

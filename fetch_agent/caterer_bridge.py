@@ -41,7 +41,7 @@ async def main():
                   loop=asyncio.get_running_loop(), mailbox=False,
                   enable_agent_inspector=False, publish_agent_details=False,
                   report_events=False, mark_inactive_on_shutdown=False, log_level=logging.CRITICAL)
-    engine = CatererConversation()
+    engine = CatererConversation(interactive_cards=False)
 
     class Inbound(Model):
         token: str = Field(min_length=32, max_length=256, repr=False)
@@ -52,7 +52,7 @@ async def main():
         ok: bool
         text: str
         html: str | None = None
-        documentKind: Literal['labels', 'grocery_demo'] | None = None
+        documentKind: Literal['labels', 'grocery_demo', 'receipt'] | None = None
 
     class Health(Model):
         service: str

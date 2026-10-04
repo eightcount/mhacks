@@ -1,11 +1,12 @@
 import { createHash } from "node:crypto";
+import { phoneNumberSchema } from "../validation/contact.js";
 
 /** Match only explicit international phone numbers or Apple ID email addresses. */
 export function normalizeIMessageHandle(value: string): string | undefined {
   const trimmed = value.trim();
   if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) return trimmed.toLowerCase();
-  const phone = trimmed.replace(/[\s().-]/g, "");
-  return /^\+[1-9]\d{7,14}$/.test(phone) ? phone : undefined;
+  const phone = phoneNumberSchema.safeParse(trimmed);
+  return phone.success ? phone.data : undefined;
 }
 export function photonDigest(...parts: string[]): string {
   return createHash("sha256").update(JSON.stringify(parts)).digest("hex");

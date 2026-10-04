@@ -5,9 +5,15 @@ reviews requests, calculates production, produces distribution labels, and draft
 customer updates. It runs independently of the customer agent on backend port
 4002 and Fetch port 8002.
 
-The local conversation uses guided commands. Fetch uses the same conversation
-engine over Chat Protocol. It does not yet interpret unrestricted natural-language
-management requests with an LLM.
+The CLI, Fetch Chat Protocol, and Photon/iMessage use the same persisted conversation
+engine. Order lookups and single-product form drafting accept natural language.
+ASI:One/Fetch and Photon/iMessage replies use text and ordinary web links. Answer
+the questions by typing and use numbered
+commands such as `accept 1` or `1:50, 2:30` for guided form product quantities.
+Common sale phrases work without an API key; when `ASI1_API_KEY` is configured,
+the existing ASI connection also interprets paraphrases and corrections. The model
+extracts draft fields only. Authenticated TypeScript tools and services still
+validate ownership, dates, fulfillment support, package limits, and prices.
 
 ## What is implemented
 
@@ -16,6 +22,7 @@ management requests with an LLM.
 | Product setup | Associate an existing menu item with a named container, measured fill, batch yield, ingredients, allergens, and storage instructions. |
 | Order collection | Create a dated form with package limits, closing time, pickup/delivery instructions, food minimum, and delivery fee; retrieve and share its link. |
 | Order review | Requests start as `REQUESTED`. Only the owning caterer can accept, decline, cancel via the tool, or complete them. |
+| Receipts | Request an itemized text and printable receipt for each listed order using its saved prices. Payment is not tracked. |
 | Weekly production | Aggregate `ACCEPTED` form orders into packages, whole recipe batches, surplus, and ingredients. Pending requests are reported separately. |
 | Shopping | Generate the actual ingredient list; optionally create an Instacart shopping link and look up current Kroger promotions at a configured store. |
 | Distribution | Print one HTML label per package using saved product/customer information. |
@@ -64,6 +71,47 @@ rather than providing a multi-tenant login system.
 
 ## Walkthrough
 
+For a product with a saved menu price and recipe/container, you can send:
+
+```text
+What orders do I have for Saturday?
+Create an order form for dumplings this Saturday.
+50 boxes, delivery only, orders close Friday at 6
+Delivery within the fictional demo area
+6pm Eastern
+free delivery
+publish
+```
+
+The agent matches the product against the business's prepared menu, shows its
+saved price, remembers the sale date, and asks only for missing details. If more
+than one product matches "dumplings", it asks you to choose. An ambiguous time
+such as "6" prompts for AM/PM; an omitted time zone uses `CATERER_TIMEZONE` if
+configured, otherwise it asks. A bare weekday deadline is resolved on or before
+the sale date. The final review displays absolute dates, the deadline's UTC offset,
+prices, package limits, location, minimum, and delivery fee. A form starts with no
+minimum; say `minimum order is $20` to change it. Delivery forms ask for a fee.
+The agent reads the business's supported fulfillment methods before asking for
+a location. A delivery-only business cannot create a pickup form. An incompatible
+saved draft retains its products, quantities, and dates, but asks for a supported
+method and fresh fulfillment instructions; it never silently switches methods.
+
+Send a correction such as `Actually, 40 boxes`, `orders close Thursday at 5pm Eastern`,
+`title: Weekend dumplings`, or `pickup at Fictional Community Hall`. Details and
+the review survive process restarts. `publish`
+creates the link only after review; `cancel` discards the draft. Prices are read
+again before publication. A changed price requires a new review.
+
+Natural drafting currently selects one prepared product. Use `new form` and enter
+quantities such as `1:50, 2:30` for multiple products. Menu products and selling prices must
+already exist: a quoted new price does not overwrite them. The agent shows the
+saved price and asks you to update the menu first or say `use menu price`.
+For a new sale, "this Saturday" means the upcoming Saturday, including on Sunday.
+Reports keep calendar-week semantics for "this Saturday"; bare "Saturday" means
+the upcoming day. The resolved date is always shown.
+
+The following guided commands remain available:
+
 Start with `menu`, then `new recipe`. The following is a **fictional calculation
 fixture**, not a real recipe or a food-safety/storage recommendation:
 
@@ -96,6 +144,7 @@ delivery
 [your actual delivery area and instructions]
 20
 3.25
+publish
 ```
 
 Use future dates appropriate to the actual sale. `1:50` means up to 50 packages
@@ -111,6 +160,7 @@ return the same order. Declined/cancelled requests release reserved capacity.
 ```text
 orders June 10–16, 2030
 accept 1
+receipt 1
 plan
 order ingredients
 deals
@@ -120,8 +170,8 @@ June 15, between 2 and 3 pm Eastern
 ```
 
 Type `June 10th` or `orders June 10th` to see just that day's orders. `today`,
-`tomorrow`, `Friday`, and `next week` also work. Dates without a year use the last
-selected year, or the current year when no date has been selected; replies always
+`tomorrow`, `Friday`, and `next week` also work. Newly supplied dates without a year
+use the current year in the caterer's local time zone; replies always
 show the resolved year. Use `June 15, 2030` for an order in 2030. ISO dates and the
 older two-date syntax still work. Ranges must be ordered and span at most 32 days.
 
@@ -132,10 +182,41 @@ resets the selection to this week. The selected dates persist across restarts.
 Relative dates use `CATERER_TIMEZONE` if configured (an IANA zone such as
 `America/Detroit`), otherwise the agent machine's timezone.
 
+To prepare only one accepted order, use its number from the latest `orders` list:
+
+```text
+plan order 8
+order ingredients for order 8
+```
+
+After `plan order 8`, plain `order ingredients` keeps that order selected, including
+after a restart. `order ingredients for the order I accepted` selects the last
+order accepted in this chat. Both paths use the saved order ID; the backend checks
+ownership and requires `ACCEPTED` before calculating whole batches and ingredients.
+Other accepted orders on the same day are excluded. A selected pending, completed,
+missing, or foreign order is rejected rather than replaced with a combined list.
+An explicit date command, such as `plan October 10, 2026`, or a fresh `orders` list
+returns ingredient planning to the combined accepted orders for those dates.
+Labels and notifications retain their existing date-based selection.
+
 `cancel` exits an unfinished setup. Recipe, form, and notification setup state
 persists across process restarts in Neon. The form's fulfillment date accepts
 named dates and relative days; its closing deadline still requires a timestamp
 with a timezone.
+
+After listing orders, `receipt 1` requests the first order's itemized receipt;
+use `receipt 2`, etc. for the other orders. `receipt for order 1` also works.
+If only one order was listed, `receipt` is enough. The selected order list
+persists across restarts. Receipts include the business, customer, order reference,
+fulfillment date, current order status, saved item prices and quantities,
+subtotal, delivery fee, and total. They are available for any listed order status
+and do not change the order or send a customer notification.
+
+Receipt text appears directly in chat. iMessage also provides a private printable
+link when public hosting is configured; it expires after one hour. The CLI saves
+each receipt as `artifacts/caterer-receipt-<order-id>.html`, printable to paper or
+PDF. Prices come from the order snapshot, so later menu changes do not alter them.
+The app does not record payments; these are order receipts and do not confirm payment.
 
 Six boxes of 12 require 72 dumplings. At a measured yield of 60 per batch, the plan
 uses **two whole batches**, lists the ingredients for two batches, and reports a
@@ -160,11 +241,24 @@ npm run caterer:fetch
 
 The seed is separate from the customer agent's seed. Connect this new local agent
 to its own [Agentverse mailbox](https://uagents.fetch.ai/docs/agentverse/mailbox).
-Without an allowlist the process refuses to start; unlisted senders cannot access
-management tools. Do not allowlist a shared relay/router that represents unrelated
-users. Such a relay requires a verified end-user identity integration first.
-Live mailbox registration and owner access are not completed by the local CLI
-verification. The CLI works without Fetch authentication or a paid LLM key.
+An empty allowlist permits startup and registration but denies all management
+requests. Open the printed Agentverse inspector URL in your signed-in browser and
+choose **Connect → Mailbox** to attach the caterer agent to your account. The
+profile publishes `fetch_agent/caterer-profile.md`, its description, and its Chat
+Protocol. The inspector and status endpoint bind to loopback.
+
+Authorize only trusted owner-controlled Fetch senders in
+`FETCH_CATERER_ALLOWED_SENDERS`, then restart `caterer:fetch`. Do not allowlist a
+shared relay/router that represents unrelated users. Such a relay requires a
+verified end-user identity integration first. Local CLI verification does not
+complete mailbox registration or owner access.
+
+When the existing Photon backend is running on 4005, set
+`FETCH_CATERER_BACKEND_PORT=4005` locally to reuse it. Otherwise the Fetch launcher
+uses `CATERER_BACKEND_PORT`, normally 4002. This override applies only to the Fetch
+launcher. Its status is at `/caterer/fetch-health` on `FETCH_CATERER_PORT`, normally
+8002. A running status does not by itself confirm Agentverse account registration.
+The CLI works without Fetch authentication or a paid LLM key.
 
 ## Grocery provider connections
 
@@ -217,8 +311,24 @@ the ingredient list and reports the missing connection explicitly.
 
 ## Messaging provider connection
 
-`notify` creates drafts only. After reviewing them, `send notification 1 confirm`
-calls the transport adapter if `CATERER_NOTIFICATION_WEBHOOK_URL` is configured.
+`notify` creates drafts only. To use a manually entered number, send
+`notification 1 to +12025550143`, replacing the example with the intended
+recipient's international phone number. This changes only that numbered draft
+and displays the updated recipient and message for review. The order's saved
+customer contact remains unchanged. Only your `DRAFT` notifications can be
+edited; sending, sent, or failed notifications cannot be redirected or retried
+by changing the number. This command and notification sends do not need the
+public form tunnel, but an existing accepted or completed order is required
+to create a notification draft.
+
+After reviewing a draft, `send notification` sends it using its saved recipient;
+there is no need to retype the phone number or add `confirm`. This uses the only
+draft, or the draft whose phone number you most recently set. If several drafts
+are waiting and none is selected, choose one with `send notification 2`, using
+its listed number. The numbered command also remembers that selection.
+`send notification 1 confirm` remains supported.
+
+The send command calls the transport adapter if `CATERER_NOTIFICATION_WEBHOOK_URL` is configured.
 `CATERER_NOTIFICATION_WEBHOOK_TOKEN` optionally authenticates it. The
 [Photon/iMessage adapter](photon-imessage.md) provides this transport and connects
 owner commands to the Fetch caterer agent. `npm run photon:start` configures the
@@ -257,6 +367,12 @@ and never send messages or purchase groceries. They exercise actual database
 transactions, concurrent capacity reservations, totals, authorization, production,
 labels, drafts, sessions, and public form submission. Test records remain on the
 disposable branch; use a branch expiration. Printed test artifacts are Git-ignored.
+
+The HTTP verification also drives the authenticated Photon message handler through
+natural form setup, a fresh conversation engine each turn, deadline clarification,
+review and publication, public form submission, and a natural Saturday order lookup.
+It uses the provisioned isolated database and a fixed future test calendar. It
+does not send a real iMessage or invoke a paid language model.
 
 If TCP migrations are unavailable, the official Drizzle `neon-serverless/migrator`
 can run the same committed migrations with a session-capable WebSocket pool using

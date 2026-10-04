@@ -1,12 +1,47 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db/index.js";
-import { catererProductSpecs } from "../db/schema/index.js";
-import { daySchema, periodSchema } from "../validation/caterer-operations.js";
+import { catererPreorders, catererProductSpecs } from "../db/schema/index.js";
+import { daySchema, orderReceiptSchema, periodSchema } from "../validation/caterer-operations.js";
 import { authorizeCaterer, CatererOperationError, listPreorders, type CatererActor } from "./caterer-operations.js";
+import { calculateOrderTotal, centsToMoney, moneyToCents } from "./money.js";
 
 import { documentHtml, escapeHtml } from "./document-html.js";
 export { documentHtml, escapeHtml } from "./document-html.js";
+
+/** Read historical order prices without changing the order or implying payment. */
+export async function createOrderReceipt(actor: CatererActor, input: unknown) {
+  const {orderId} = orderReceiptSchema.parse(input);
+  const caterer = await authorizeCaterer(actor);
+  const [order] = await db.select().from(catererPreorders)
+    .where(and(eq(catererPreorders.id, orderId), eq(catererPreorders.catererId, actor.catererId)));
+  if (!order) throw new CatererOperationError("Order not found for this caterer.");
+
+  const subtotal = calculateOrderTotal(order.items);
+  const totalCents = moneyToCents(order.total);
+  // Delivery is the only charge beyond items in submitPreorder. Recover its
+  // historical amount from the saved total, never the current form or menu.
+  if (totalCents < subtotal.cents) throw new CatererOperationError("The saved order total does not match its items. Check the order before requesting a receipt.");
+  const deliveryFee = centsToMoney(totalCents - subtotal.cents);
+  const total = centsToMoney(totalCents);
+  const items = order.items.map(item => ({...item,
+    unitPrice: centsToMoney(moneyToCents(item.unitPrice)),
+    lineTotal: centsToMoney(moneyToCents(item.unitPrice) * item.quantity)}));
+  const details = [`Order: ${order.id}`, `Customer: ${order.customerName}`,
+    `Fulfillment date: ${order.fulfillmentDate}`, `Order status: ${order.status}`];
+  const totals = [`Subtotal: $${subtotal.amount}`, `Delivery fee: $${deliveryFee}`, `Total: $${total}`];
+  const payment = "Payment is not recorded by this app. This receipt summarizes the order and does not confirm payment.";
+  const text = ["Order receipt", caterer.businessName, ...details, "",
+    ...items.map(item => `${item.quantity} × ${item.name} — ${item.container} — $${item.unitPrice} each = $${item.lineTotal}`),
+    "", ...totals, "", payment].join("\n");
+  const html = documentHtml("Order receipt", `<h1>Order receipt</h1><h2>${escapeHtml(caterer.businessName)}</h2>
+    ${details.map(line => `<p>${escapeHtml(line)}</p>`).join("")}
+    <table class="receipt-items"><thead><tr><th scope="col">Item / container</th><th scope="col">Qty</th><th scope="col">Unit price</th><th scope="col">Amount</th></tr></thead>
+    <tbody>${items.map(item => `<tr><td>${escapeHtml(item.name)}<small>${escapeHtml(item.container)}</small></td><td>${item.quantity}</td><td>$${item.unitPrice}</td><td>$${item.lineTotal}</td></tr>`).join("")}</tbody></table>
+    ${totals.map(line => `<p><strong>${escapeHtml(line)}</strong></p>`).join("")}
+    <p>${escapeHtml(payment)}</p><p class="no-print">Print this page to paper or save it as PDF.</p>`);
+  return {orderId: order.id, text, html, documentKind: "receipt" as const};
+}
 
 export async function createLabels(actor: CatererActor, input: unknown) {
   const parsed = z.object({start: daySchema, end: daySchema, preparedOn: daySchema.optional(), useBy: daySchema.optional()}).strict().parse(input);

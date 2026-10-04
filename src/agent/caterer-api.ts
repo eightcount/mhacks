@@ -7,6 +7,7 @@ import { getPublicForm, submitPreorder, CatererOperationError } from "../service
 import { documentHtml, escapeHtml as e } from "../services/caterer-documents.js";
 import { DomainError } from "../services/errors.js";
 import { readPhotonDocument } from "../services/photon-receipts.js";
+import { handlePhotonCardRequest } from "../messaging/photon-card-handler.js";
 
 const actor = z.object({catererId: z.string().uuid(), actorUserId: z.string().uuid()}).parse({
   catererId: process.env.CATERER_ID, actorUserId: process.env.CATERER_OWNER_USER_ID
@@ -25,6 +26,7 @@ const server = createServer(async (request, response) => {
   const json = (status: number, value: unknown) => {response.writeHead(status, {"Content-Type": "application/json"}); response.end(JSON.stringify(value));};
   const html = (status: number, value: string) => {response.writeHead(status, {"Content-Type": "text/html; charset=utf-8"}); response.end(value);};
   try {
+    if (await handlePhotonCardRequest(request, response, actor)) return;
     if (path === "/health") return json(200, {status: "ok", features: ["caterer", "photon"]});
     const documentKey = /^\/documents\/([a-f0-9]{64})$/.exec(path)?.[1];
     if (documentKey && request.method === "GET") {

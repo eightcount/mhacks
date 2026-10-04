@@ -19,7 +19,7 @@
     "agent:cli": "node scripts/run-agent.mjs cli",
     "agent:fetch": "node scripts/run-agent.mjs fetch",
     "agent:configure": "node scripts/configure-agent-env.mjs",
-    "test:agent": "python3 -m unittest fetch_agent.test_conversation fetch_agent.test_fetch_startup fetch_agent.test_caterer fetch_agent.test_caterer_bridge fetch_agent.test_caterer_dates",
+    "test:agent": "python3 -m unittest fetch_agent.test_conversation fetch_agent.test_fetch_startup fetch_agent.test_caterer fetch_agent.test_caterer_bridge fetch_agent.test_caterer_dates fetch_agent.test_caterer_fetch fetch_agent.test_caterer_forms fetch_agent.test_caterer_cards",
     "caterer:configure": "node scripts/configure-caterer-env.mjs",
     "caterer:backend": "tsx src/agent/caterer-api.ts",
     "caterer:cli": "node scripts/run-caterer.mjs cli",

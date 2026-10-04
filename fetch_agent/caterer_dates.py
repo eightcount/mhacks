@@ -109,6 +109,14 @@ def describe_period(value: dict) -> str:
 
 def report_request(text: str) -> tuple[str, str] | None:
     value = _normalize(text)
+    value = re.sub(r'^(?:can|could|would) you (?:please )?', '', value)
+    value = re.sub(r'^please ', '', value)
+    value = re.sub(r' please$', '', value)
+    question = re.fullmatch(
+        r"(?:what|which) (?:orders|requests) (?:do i have|have i (?:got|received)|are (?:there|due))"
+        r"(?: (?:for|on) (.+))?", value)
+    if question:
+        return 'orders', question[1] or ''
     shopping = (
         'mass order everything from instacart', 'order all ingredients from instacart',
         'order everything from instacart', 'order ingredients from instacart',

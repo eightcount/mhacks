@@ -1,7 +1,7 @@
 import { and, desc, eq, gte, inArray, lte, notInArray } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { caterers, catererProductSpecs, catererOrderForms, catererPreorders, catererNotificationDrafts, menuItems } from "../db/schema/index.js";
-import { formSchema, notificationSchema, periodSchema, preorderSchema, statusChangeSchema } from "../validation/caterer-operations.js";
+import { batchStatusChangeSchema, formSchema, notificationRecipientSchema, notificationSchema, periodSchema, preorderSchema, productionSelectionSchema, statusChangeSchema } from "../validation/caterer-operations.js";
 import { getCaterer } from "./caterers.js";
 import { assertCatererOwnership } from "./authorization.js";
 import { calculateOrderTotal, centsToMoney, moneyToCents } from "./money.js";
@@ -14,6 +14,11 @@ export async function authorizeCaterer(actor: CatererActor) {
   const caterer = await getCaterer(actor.catererId);
   assertCatererOwnership(caterer, actor.actorUserId);
   return caterer;
+}
+export async function getOrderFormOptions(actor: CatererActor): Promise<{supportedFulfillmentMethods: Array<"PICKUP" | "DELIVERY">}> {
+  const caterer = await authorizeCaterer(actor);
+  return {supportedFulfillmentMethods: caterer.fulfillmentMethod === "EITHER"
+    ? ["PICKUP", "DELIVERY"] : [caterer.fulfillmentMethod]};
 }
 export async function saveProductSpec(actor: CatererActor, input: unknown) {
   await authorizeCaterer(actor);
@@ -29,10 +34,12 @@ export async function listProductSpecs(actor: CatererActor) {
   await authorizeCaterer(actor);
   return db.select().from(catererProductSpecs).where(eq(catererProductSpecs.catererId, actor.catererId)).orderBy(desc(catererProductSpecs.createdAt));
 }
-export async function createOrderForm(actor: CatererActor, input: unknown) {
+export async function previewOrderForm(actor: CatererActor, input: unknown) {
   const caterer = await authorizeCaterer(actor), parsed = formSchema.parse(input);
   if (!caterer.active) throw new CatererOperationError("Activate the caterer before opening an order form.");
-  if (caterer.fulfillmentMethod !== "EITHER" && caterer.fulfillmentMethod !== parsed.fulfillmentMethod) throw new CatererOperationError("This caterer does not support that fulfillment method.");
+  if (caterer.fulfillmentMethod !== "EITHER" && caterer.fulfillmentMethod !== parsed.fulfillmentMethod) {
+    throw new CatererOperationError(`This caterer does not support ${parsed.fulfillmentMethod.toLowerCase()}. Choose ${caterer.fulfillmentMethod.toLowerCase()} for this form.`);
+  }
   const closesAt = new Date(parsed.closesAt);
   if (closesAt.getTime() <= Date.now() || parsed.closesAt.slice(0, 10) > parsed.fulfillmentDate) throw new CatererOperationError("The closing time must be in the future and no later than the fulfillment date in its supplied time zone.");
   const definitions = await db.select({definition: catererProductSpecs, price: menuItems.price, active: menuItems.active})
@@ -41,13 +48,20 @@ export async function createOrderForm(actor: CatererActor, input: unknown) {
   const products = parsed.products.map(selection => {
     const row = definitions.find(row => row.definition.id === selection.productSpecId);
     if (!row || !row.active) throw new CatererOperationError("Every product must be an active item owned by this caterer.");
-    return {...selection, name: row.definition.productName, unitPrice: row.price,
+    if (selection.expectedUnitPrice !== undefined && moneyToCents(selection.expectedUnitPrice) !== moneyToCents(row.price)) {
+      throw new CatererOperationError("A menu price changed. Review the form again before publishing.");
+    }
+    return {productSpecId: selection.productSpecId, maxPackages: selection.maxPackages, name: row.definition.productName, unitPrice: row.price,
       container: `${row.definition.spec.container.name} (${row.definition.spec.container.fill.amount} ${row.definition.spec.container.fill.unit})`};
   });
-  const [form] = await db.insert(catererOrderForms).values({catererId: actor.catererId, title: parsed.title,
+  return {catererId: actor.catererId, title: parsed.title,
     fulfillmentDate: parsed.fulfillmentDate, closesAt, fulfillmentMethod: parsed.fulfillmentMethod,
     fulfillmentInstructions: parsed.fulfillmentInstructions, minimumOrder: parsed.minimumOrder,
-    deliveryFee: parsed.fulfillmentMethod === "DELIVERY" ? parsed.deliveryFee : "0.00", products}).returning();
+    deliveryFee: parsed.fulfillmentMethod === "DELIVERY" ? parsed.deliveryFee : "0.00", products};
+}
+export async function createOrderForm(actor: CatererActor, input: unknown) {
+  const prepared = await previewOrderForm(actor, input);
+  const [form] = await db.insert(catererOrderForms).values(prepared).returning();
   return form;
 }
 export async function getPublicForm(formId: string) {
@@ -108,8 +122,33 @@ export async function changePreorderStatus(actor: CatererActor, input: unknown) 
     return updated;
   });
 }
+/** Validate the entire selection under row locks before changing any order. */
+export async function changePreorderStatuses(actor: CatererActor, input: unknown) {
+  await authorizeCaterer(actor);
+  const parsed = batchStatusChangeSchema.parse(input);
+  return db.transaction(async tx => {
+    const owned = and(eq(catererPreorders.catererId, actor.catererId), inArray(catererPreorders.id, parsed.orderIds));
+    const orders = await tx.select().from(catererPreorders).where(owned).orderBy(catererPreorders.id).for("update");
+    if (orders.length !== parsed.orderIds.length) throw new CatererOperationError("Every selected order must belong to this caterer. No orders changed.");
+    for (const order of orders) assertOrderTransition(order.status, parsed.status);
+    return tx.update(catererPreorders).set({status: parsed.status, updatedAt: new Date()}).where(owned).returning();
+  });
+}
 export async function productionPlan(actor: CatererActor, input: unknown) {
-  const orders = await listPreorders(actor, input);
+  const selection = productionSelectionSchema.parse(input);
+  let orders: Awaited<ReturnType<typeof listPreorders>>;
+  if ("orderId" in selection) {
+    await authorizeCaterer(actor);
+    const [order] = await db.select().from(catererPreorders).where(and(
+      eq(catererPreorders.id, selection.orderId), eq(catererPreorders.catererId, actor.catererId)));
+    if (!order) throw new CatererOperationError("Order not found for this caterer.");
+    if (order.status !== "ACCEPTED") throw new CatererOperationError("This order must be accepted before planning or shopping for its ingredients.");
+    orders = [order];
+  } else {
+    orders = await listPreorders(actor, selection);
+  }
+  const dates = "orderId" in selection
+    ? {start: orders[0]!.fulfillmentDate, end: orders[0]!.fulfillmentDate} : selection;
   const accepted = orders.filter(order => order.status === "ACCEPTED");
   const ids = [...new Set(accepted.flatMap(order => order.items.map(item => item.productSpecId)))];
   const specs = ids.length ? await db.select().from(catererProductSpecs).where(and(eq(catererProductSpecs.catererId, actor.catererId), inArray(catererProductSpecs.id, ids))) : [];
@@ -121,7 +160,9 @@ export async function productionPlan(actor: CatererActor, input: unknown) {
     grouped.set(definition.id, {productSpecId: definition.id, productName: item.name, spec: definition.spec, packages: item.quantity + (prior?.packages ?? 0)});
   }
   return {...calculateProduction([...grouped.values()]), acceptedOrders: accepted.length,
-    pendingRequests: orders.filter(order => order.status === "REQUESTED").length, scope: "Accepted orders from caterer order forms"};
+    pendingRequests: orders.filter(order => order.status === "REQUESTED").length, period: dates,
+    ...("orderId" in selection ? {orderId: selection.orderId} : {}),
+    scope: "orderId" in selection ? "One accepted order from a caterer order form" : "Accepted orders from caterer order forms"};
 }
 export async function draftNotifications(actor: CatererActor, input: unknown) {
   const caterer = await authorizeCaterer(actor), parsed = notificationSchema.parse(input);
@@ -130,4 +171,18 @@ export async function draftNotifications(actor: CatererActor, input: unknown) {
   if (orders.length !== ids.length || orders.some(order => !["ACCEPTED", "COMPLETED"].includes(order.status))) throw new CatererOperationError("Notifications require accepted or completed orders belonging to this caterer.");
   return db.insert(catererNotificationDrafts).values(orders.map(order => ({catererId: actor.catererId, orderId: order.id,
     recipient: order.customerContact, body: `Hi ${order.customerName}, your order from ${caterer.businessName} is scheduled for ${order.fulfillmentDate}, ${parsed.deliveryWindow}. ${parsed.note}`.trim(), status: "DRAFT"}))).returning();
+}
+
+/** Change only an owned, unsent draft; the customer's order contact is untouched. */
+export async function updateNotificationRecipient(actor: CatererActor, input: unknown) {
+  const parsed = notificationRecipientSchema.parse(input);
+  await authorizeCaterer(actor);
+  // Atomic with the send claim: a draft already being sent cannot be redirected.
+  const [draft] = await db.update(catererNotificationDrafts)
+    .set({recipient: parsed.recipient, updatedAt: new Date()})
+    .where(and(eq(catererNotificationDrafts.id, parsed.notificationId),
+      eq(catererNotificationDrafts.catererId, actor.catererId), eq(catererNotificationDrafts.status, "DRAFT")))
+    .returning();
+  if (!draft) throw new CatererOperationError("Only your unsent notification drafts can be edited. Create a new draft with 'notify'.");
+  return draft;
 }

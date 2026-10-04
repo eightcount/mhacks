@@ -15,8 +15,8 @@ export async function callCatererAgent(sessionId: string, text: string): Promise
   });
   if (!response.ok) throw new Error("Fetch caterer bridge is unavailable.");
   const result = z.object({ok: z.boolean(), text: z.string(), html: z.string().nullable().optional(),
-    documentKind: agentReplySchema.shape.documentKind.nullable()}).parse(await response.json());
+    documentKind: agentReplySchema.shape.documentKind.nullable(), card: agentReplySchema.shape.card.nullable()}).parse(await response.json());
   if (!result.ok) throw new Error("Fetch caterer bridge could not complete the message.");
   return agentReplySchema.parse({text: result.text, ...(result.html ? {html: result.html} : {}),
-    ...(result.documentKind ? {documentKind: result.documentKind} : {})});
+    ...(result.documentKind ? {documentKind: result.documentKind} : {}), ...(result.card ? {card: result.card} : {})});
 }
