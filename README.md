@@ -249,21 +249,25 @@ Open it with a caterer ID and the user ID of that caterer's owner. In the shared
 http://localhost:3000/?catererId=22000000-0000-4000-8000-000000000001&actorUserId=11000000-0000-4000-8000-000000000001
 ```
 
-The page shows only what a caterer needs day to day. Every figure comes from Neon records:
+The page shows only what a caterer needs day to day. Every figure comes from Neon records.
 
-- **Revenue:** stored order totals of `ACCEPTED` and `COMPLETED` orders with an event date in the current month, split into completed and still to fill. Booked preorders for the month are shown separately. Payments are not tracked, so this is booked order value.
-- **Orders to fill** and **Upcoming:** `ACCEPTED` orders with an event date from today on.
-- **Awaiting your reply:** `REQUESTED` catering orders and preorders.
-- **Customers:** distinct customers with an `ACCEPTED` or `COMPLETED` order, and how many have more than one.
+The arrows beside the month at the top (and a **This month** shortcut) set the month for the four tiles and their detail views. Orders count toward the month of their event date and preorders toward their pickup or delivery date. The lists below the tiles always show what is happening now.
+
+- **Revenue:** stored order totals of `ACCEPTED` and `COMPLETED` orders in the month, split into completed and still to fill, with booked preorders shown separately. Payments are not tracked, so this is booked order value. Its detail view charts booked value for the six months ending with the selected month and lists the month's booked orders.
+- **Orders to fill:** `ACCEPTED` orders in the month, with guests and the next event. Its detail view charts guests by day, still to fill and already filled, and lists both groups of orders.
+- **Awaiting your reply:** `REQUESTED` catering orders and preorders for the month's events. Its detail view shows how long each has waited and lists them.
+- **Customers:** distinct customers with a booked order in the month, split into new (their first booked event is in that month) and returning. Its detail view charts new and returning customers for six months and lists the month's customers by booked value.
+- **Upcoming:** `ACCEPTED` orders with an event date from today on.
 - **Pending requests:** `REQUESTED` orders waiting for the caterer, with event style, fulfillment, dietary restrictions, items, and special requests.
-- **Customer notifications:** pickup and delivery notification drafts (`caterer_notification_drafts`), newest first, with counts by delivery status.
 - **Menu for the week:** the active menu, busiest first, with the servings in booked catering orders and the packages in booked preorders dated in the next seven days, starting today. An inactive item appears only if something is still booked for it.
 
-The JSON endpoint also returns availability, booked value by month, the order pipeline, order forms, a production plan, request mix, top customers, the full menu, and order history for other clients; the page doesn't display them.
+Each tile links to its detail view (`#revenue`, `#orders`, `#awaiting`, `#customers`); the browser's Back button or Esc returns to the dashboard. Opening, closing, and changing months animate with the browser's View Transitions API, with a simpler entrance animation where it isn't available and no motion when the system asks for reduced motion.
+
+The JSON endpoint returns the selected month's figures and details as `monthView`. It also returns availability, booked value by month, the order pipeline, order forms, a production plan, customer notifications, request mix, top customers, the full menu, and order history for other clients; the page doesn't display them.
 
 Draft orders are hidden because the customer has not submitted them. Order lines use each order item's stored price snapshot, and money is added in integer cents.
 
-The page refreshes every 30 seconds and when its tab regains focus, so orders created or changed through the agent's tools appear without agent-specific dashboard code. Add `&today=YYYY-MM-DD` to view the dashboard as of another date; order forms are then judged open or closed as of noon UTC that day. The JSON is at `GET /api/caterers/:catererId/dashboard?actorUserId=...`. Set `DASHBOARD_PORT` to use a port other than 3000.
+The page refreshes every 30 seconds and when its tab regains focus, so orders created or changed through the agent's tools appear without agent-specific dashboard code. Add `&month=YYYY-MM` to open a specific month, or `&today=YYYY-MM-DD` to view the dashboard as of another date; order forms are then judged open or closed as of noon UTC that day. The JSON is at `GET /api/caterers/:catererId/dashboard?actorUserId=...`. Set `DASHBOARD_PORT` to use a port other than 3000.
 
 Until authentication exists, the owner check uses the same actor-ID boundary as the other caterer services: the caller states who they are in the URL. Keep the server local; do not expose it publicly.
 

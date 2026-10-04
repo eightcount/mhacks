@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/styles.css" />
@@ -15,122 +15,119 @@
   </head>
   <body>
     <svg xmlns="http://www.w3.org/2000/svg" hidden>
-      <symbol id="i-wallet" viewBox="0 0 24 24">
-        <path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1" />
-        <path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4" />
-      </symbol>
-      <symbol id="i-clipboard" viewBox="0 0 24 24">
-        <rect width="8" height="4" x="8" y="2" rx="1" />
-        <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
-        <path d="M12 11h4M12 16h4M8 11h.01M8 16h.01" />
-      </symbol>
-      <symbol id="i-users" viewBox="0 0 24 24">
-        <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
-        <circle cx="9" cy="7" r="4" />
-        <path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
-      </symbol>
-      <symbol id="i-inbox" viewBox="0 0 24 24">
-        <path d="M22 12h-6l-2 3h-4l-2-3H2" />
-        <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
-      </symbol>
-      <symbol id="i-alert" viewBox="0 0 24 24">
-        <circle cx="12" cy="12" r="10" />
-        <path d="M12 8v4M12 16h.01" />
-      </symbol>
       <symbol id="i-refresh" viewBox="0 0 24 24">
         <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
         <path d="M21 3v5h-5" />
         <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
         <path d="M8 16H3v5" />
       </symbol>
+      <symbol id="i-left" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6" /></symbol>
+      <symbol id="i-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6" /></symbol>
     </svg>
 
-    <main class="page">
-      <header class="topbar">
-        <div>
-          <h1>Welcome back<span id="business-name-wrap" hidden>, <span class="accent" id="business-name"></span></span></h1>
-          <p class="subtitle" id="subtitle"></p>
-        </div>
-        <div class="refresh" id="refresh-area" hidden>
-          <span class="updated" id="updated-at" aria-live="polite"></span>
-          <button class="icon-button" id="refresh-button" type="button" aria-label="Refresh dashboard">
-            <svg class="icon" aria-hidden="true"><use href="#i-refresh" /></svg>
-          </button>
-        </div>
-      </header>
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark" id="brand-mark" aria-hidden="true"></span>
+        <h1 class="brand-name" id="business-name"></h1>
+      </div>
+      <div class="refresh" id="refresh-area" hidden>
+        <span class="updated"><span id="today-label"></span><span id="updated-at" aria-live="polite"></span></span>
+        <button class="button" id="refresh-button" type="button">
+          <svg class="icon" aria-hidden="true"><use href="#i-refresh" /></svg><span class="button-text">Refresh</span>
+        </button>
+      </div>
+    </header>
 
+    <main class="page">
       <div class="notice" id="notice" role="alert" hidden>
         <p class="notice-title" id="notice-title"></p>
         <p class="notice-body" id="notice-body"></p>
       </div>
 
       <div class="dashboard" id="dashboard" hidden>
-        <section class="stats" aria-label="Statistics">
-          <article class="stat">
-            <p class="stat-label">
-              <svg class="icon" aria-hidden="true"><use href="#i-wallet" /></svg>Revenue
-            </p>
-            <p class="stat-value" id="revenue-total">–</p>
-            <p class="stat-sub" id="revenue-sub"></p>
-            <p class="stat-sub" id="revenue-preorders"></p>
-          </article>
-          <article class="stat">
-            <p class="stat-label">
-              <svg class="icon" aria-hidden="true"><use href="#i-clipboard" /></svg>Orders to fill
-            </p>
-            <p class="stat-value" id="orders-to-fill">–</p>
-            <p class="stat-sub" id="orders-sub"></p>
-          </article>
-          <article class="stat">
-            <p class="stat-label">
-              <svg class="icon" aria-hidden="true"><use href="#i-inbox" /></svg>Awaiting your reply
-            </p>
-            <p class="stat-value" id="awaiting-total">–</p>
-            <p class="stat-sub" id="awaiting-sub"></p>
-          </article>
-          <article class="stat">
-            <p class="stat-label">
-              <svg class="icon" aria-hidden="true"><use href="#i-users" /></svg>Customers
-            </p>
-            <p class="stat-value" id="customers-total">–</p>
-            <p class="stat-sub" id="customers-sub"></p>
-          </article>
-        </section>
+        <div class="month-bar">
+          <div class="month-nav">
+            <button class="month-step" id="month-prev" type="button" aria-label="Previous month">
+              <svg class="icon" aria-hidden="true"><use href="#i-left" /></svg>
+            </button>
+            <h2 class="month-title" id="month-heading" aria-live="polite"></h2>
+            <button class="month-step" id="month-next" type="button" aria-label="Next month">
+              <svg class="icon" aria-hidden="true"><use href="#i-right" /></svg>
+            </button>
+          </div>
+          <button class="button-outline" id="month-current" type="button" hidden>This month</button>
+        </div>
 
-        <div class="columns">
-          <section class="card" aria-labelledby="upcoming-heading">
-            <div class="card-head">
-              <h2 id="upcoming-heading">Upcoming</h2>
-              <span class="muted">Accepted orders</span>
-            </div>
-            <ul class="rows scroll-list" id="upcoming-list" tabindex="0" aria-labelledby="upcoming-heading"></ul>
-          </section>
+        <nav class="stats" aria-labelledby="month-heading">
+          <a class="stat" href="#revenue" data-view="revenue">
+            <span class="stat-label">Revenue</span>
+            <span class="stat-value" id="revenue-total">–</span>
+            <span class="stat-sub" id="revenue-sub"></span>
+            <span class="stat-sub" id="revenue-preorders"></span>
+          </a>
+          <a class="stat" href="#orders" data-view="orders">
+            <span class="stat-label">Orders to fill</span>
+            <span class="stat-value" id="orders-to-fill">–</span>
+            <span class="stat-sub" id="orders-sub"></span>
+          </a>
+          <a class="stat" href="#awaiting" data-view="awaiting">
+            <span class="stat-label">Awaiting your reply</span>
+            <span class="stat-value" id="awaiting-total">–</span>
+            <span class="stat-sub" id="awaiting-sub"></span>
+          </a>
+          <a class="stat" href="#customers" data-view="customers">
+            <span class="stat-label">Customers</span>
+            <span class="stat-value" id="customers-total">–</span>
+            <span class="stat-sub" id="customers-sub"></span>
+          </a>
+        </nav>
 
-          <section class="card" aria-labelledby="requests-heading">
-            <div class="card-head">
-              <h2 id="requests-heading">Pending requests</h2>
-              <span class="count" id="requests-count">0</span>
+        <div class="view" id="home-view">
+          <div class="columns">
+            <section aria-labelledby="upcoming-heading">
+              <div class="section-head">
+                <h2 class="section-title" id="upcoming-heading">Upcoming</h2>
+                <span class="section-note">Accepted orders</span>
+              </div>
+              <div class="panel">
+                <ul class="rows scroll-list" id="upcoming-list" tabindex="0" aria-labelledby="upcoming-heading"></ul>
+              </div>
+            </section>
+
+            <section aria-labelledby="requests-heading">
+              <div class="section-head">
+                <h2 class="section-title" id="requests-heading">Pending requests</h2>
+                <span class="badge" id="requests-count">0</span>
+              </div>
+              <div class="panel">
+                <ul class="rows scroll-list" id="request-list" tabindex="0" aria-labelledby="requests-heading"></ul>
+              </div>
+            </section>
+          </div>
+
+          <section aria-labelledby="menu-heading">
+            <div class="section-head">
+              <h2 class="section-title" id="menu-heading">Menu for the week</h2>
+              <span class="section-note" id="menu-range"></span>
             </div>
-            <ul class="rows scroll-list" id="request-list" tabindex="0" aria-labelledby="requests-heading"></ul>
+            <ol class="menu" id="menu-list" aria-labelledby="menu-heading"></ol>
           </section>
         </div>
 
-        <section class="card" aria-labelledby="notifications-heading">
-          <div class="card-head">
-            <h2 id="notifications-heading">Customer notifications</h2>
-            <ul class="chips" id="notification-counts" aria-label="Notifications by status"></ul>
+        <section class="view detail" id="detail-view" aria-labelledby="detail-title" hidden>
+          <div class="detail-head">
+            <a class="back-link" href="#home">
+              <svg class="icon" aria-hidden="true"><use href="#i-left" /></svg>Dashboard
+            </a>
+            <h2 class="detail-title" id="detail-title"></h2>
           </div>
-          <ul class="rows scroll-list" id="notification-list" tabindex="0" aria-labelledby="notifications-heading"></ul>
-        </section>
-
-        <section class="card" aria-labelledby="menu-heading">
-          <div class="card-head">
-            <h2 id="menu-heading">Menu for the week</h2>
-            <span class="muted" id="menu-range"></span>
-          </div>
-          <ol class="menu" id="menu-list" aria-labelledby="menu-heading"></ol>
+          <div id="detail-body"></div>
         </section>
       </div>
     </main>
+
+    <footer class="footer" id="footer" hidden>
+      <p>Updates automatically every 30 seconds</p>
+    </footer>
   </body>
 </html>
