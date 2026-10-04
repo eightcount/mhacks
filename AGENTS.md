@@ -202,6 +202,18 @@ Maintain appropriate:
 
 Avoid destructive cascades that could remove historical order data.
 
+## Shared Neon Database Handoff
+
+Before any database, migration, reporting, or deployment work, read
+[`docs/neon-database-handoff.md`](docs/neon-database-handoff.md). It explains
+the remote Neon architecture, current schema, migration source of truth, and
+the state of the shared development database.
+
+If database access is required, request it from **NLI** using the secure access
+procedure in that handoff. Do not ask for, accept, print, log, commit, or paste
+database credentials into an agent prompt, issue, pull request, chat, source
+file, or test output.
+
 ## Environment Variables and Secrets
 
 Secrets belong in local environment variables.
